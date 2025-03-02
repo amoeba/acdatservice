@@ -199,18 +199,13 @@ const main = function () {
     return;
   };
 
-  console.log("main");
-
-  // let reader = fs.createReadStream(portal_path);
   const reader = new SeekableFileReader(portal_path);
   const file = new DatFile(portal_path);
   file.read_header();
 
+  // Debugging
   file.debug();
   file.header?.debug();
-
-  // this.magic = reader.getUint32();
-  // this.blockSize = reader.getUint32();
 
   reader.close();
 }

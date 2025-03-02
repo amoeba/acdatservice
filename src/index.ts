@@ -160,10 +160,7 @@ class DatDatabaseHeader {
   }
 
   debug() {
-    console.log("DatFileHeader");
-    Object.entries(this).forEach((k, v) => {
-      console.log(`${k} => ${v}`);
-    });
+    console.log("DatFileHeader: " + JSON.stringify(this));
   }
 }
 
@@ -182,11 +179,9 @@ class DatFile {
   }
 
   debug() {
-    console.log("DatFile");
-    Object.entries(this).forEach((k, v) => {
-      console.log(`${k} => ${v}`);
-    });
+    console.log("DatFile: " + JSON.stringify(this));
   }
+
 }
 
 const main = function () {

@@ -174,7 +174,6 @@ class DatFile {
 
   read_header() {
     this.header = new DatDatabaseHeader();
-    // I probably can read the entire header into a buffer and pass it here
     this.header.read(this.reader);
   }
 

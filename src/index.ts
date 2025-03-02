@@ -48,6 +48,41 @@ class SeekableFileReader {
     }
   }
 
+  ReadInt8(): number {
+    const buf = this.read(1);
+    const view = new DataView(buf.buffer);
+
+    return view.getInt8(0);
+  }
+
+  ReadInt16(): number {
+    const buf = this.read(2);
+    const view = new DataView(buf.buffer);
+
+    return view.getInt16(0);
+  }
+
+  ReadInt32(): number {
+    const buf = this.read(4);
+    const view = new DataView(buf.buffer);
+
+    return view.getInt32(0);
+  }
+
+  ReadUInt8(): number {
+    const buf = this.read(1);
+    const view = new DataView(buf.buffer);
+
+    return view.getUint8(0);
+  }
+
+  ReadUInt16(): number {
+    const buf = this.read(2);
+    const view = new DataView(buf.buffer);
+
+    return view.getUint16(0);
+  }
+
   ReadUInt32(): number {
     const buf = this.read(4);
     const view = new DataView(buf.buffer);

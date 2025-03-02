@@ -1,0 +1,25 @@
+{
+  "name": "acdatservice",
+  "description": "acdatservice",
+  "author": "Bryce Mecum",
+  "version": "0.1.0",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/amoeba/acdatservice.git"
+  },
+  "bugs": {
+    "url": "https://github.com/amoeba/acdatservice/issues"
+  },
+  "homepage": "https://github.com/amoeba/acdatservice#readme",
+  "scripts": {
+    "main": "ts-node src/index.ts",
+    "build": "tsc",
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "devDependencies": {
+    "@types/node": "^22.13.8",
+    "ts-node": "^10.9.2",
+    "typescript": "^5.8.2"
+  }
+}

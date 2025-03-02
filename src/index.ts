@@ -89,23 +89,81 @@ class SeekableFileReader {
 
     return view.getUint32(0);
   }
+
+  ReadUint8Array(count: number): Uint8Array {
+    const buf = this.read(count);
+    const out = new Uint8Array(buf);
+
+    return out;
+  }
+
+  ReadString(): string {
+    return "";
+  }
 }
 
 class DatDatabaseHeader {
-  constructor() {
+  FileType: number | undefined;
+  BlockSize: number | undefined;
+  FileSize: number | undefined;
+  DataSet: any | undefined;
+  DataSubset: number | undefined;
+  FreeHead: number | undefined;
+  FreeTail: number | undefined;
+  FreeCount: number | undefined;
+  BTree: number | undefined;
+  NewLRU: number | undefined;
+  OldLRU: number | undefined;
+  UseLRU: boolean | undefined;
+  MasterMapID: number | undefined;
+  EnginePackVersion: number | undefined;
+  GamePackVersion: number | undefined;
+  VersionMajor: Uint8Array | undefined;
+  VersionMinor: number | undefined;
 
+  constructor() {
+    // TODO
   }
 
   read(reader: SeekableFileReader) {
+    // TODO: Figure out why the other impl skips this data
     var offset = 256;
-    // var view = new DataView(this.buffer, 0, 0x400);
-    // this.transactions = new Uint8Array(this.buffer, offset, 64);
     offset += 64;
-
     reader.seek(offset);
-    let last_read = reader.ReadUInt32();
-    console.log(last_read);
 
+    this.FileType = reader.ReadUInt32();
+    this.BlockSize = reader.ReadUInt32();
+    this.FileSize = reader.ReadUInt32();
+
+    // TODO: Remember I can try casting this. For now, just read and store
+    // directly
+    //
+    // this.DataSet = (DatDatabaseType)reader.ReadUInt32();
+    this.DataSet = reader.ReadUInt32();
+    this.DataSubset = reader.ReadUInt32();
+
+    this.FreeHead = reader.ReadUInt32();
+    this.FreeTail = reader.ReadUInt32();
+    this.FreeCount = reader.ReadUInt32();
+    this.BTree = reader.ReadUInt32();
+
+    this.NewLRU = reader.ReadUInt32();
+    this.OldLRU = reader.ReadUInt32();
+    this.UseLRU = (reader.ReadUInt32() == 1);
+
+    this.MasterMapID = reader.ReadUInt32();
+
+    this.EnginePackVersion = reader.ReadUInt32();
+    this.GamePackVersion = reader.ReadUInt32();
+    this.VersionMajor = reader.ReadUint8Array(16);
+    this.VersionMinor = reader.ReadUInt32();
+  }
+
+  debug() {
+    console.log("DatFileHeader");
+    Object.entries(this).forEach((k, v) => {
+      console.log(`${k} => ${v}`);
+    });
   }
 }
 
@@ -121,6 +179,13 @@ class DatFile {
     this.header = new DatDatabaseHeader();
     // I probably can read the entire header into a buffer and pass it here
     this.header.read(this.reader);
+  }
+
+  debug() {
+    console.log("DatFile");
+    Object.entries(this).forEach((k, v) => {
+      console.log(`${k} => ${v}`);
+    });
   }
 }
 
@@ -146,6 +211,9 @@ const main = function () {
   const reader = new SeekableFileReader(portal_path);
   const file = new DatFile(portal_path);
   file.read_header();
+
+  file.debug();
+  file.header?.debug();
 
   // this.magic = reader.getUint32();
   // this.blockSize = reader.getUint32();

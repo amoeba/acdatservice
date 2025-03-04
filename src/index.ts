@@ -59,14 +59,14 @@ class SeekableFileReader {
     const buf = this.read(2);
     const view = new DataView(buf.buffer);
 
-    return view.getInt16(0);
+    return view.getInt16(0, true);
   }
 
   ReadInt32(): number {
     const buf = this.read(4);
     const view = new DataView(buf.buffer);
 
-    return view.getInt32(0);
+    return view.getInt32(0, true);
   }
 
   ReadUInt8(): number {
@@ -80,14 +80,14 @@ class SeekableFileReader {
     const buf = this.read(2);
     const view = new DataView(buf.buffer);
 
-    return view.getUint16(0);
+    return view.getUint16(0, true);
   }
 
   ReadUInt32(): number {
     const buf = this.read(4);
     const view = new DataView(buf.buffer);
 
-    return view.getUint32(0);
+    return view.getUint32(0, true);
   }
 
   ReadUint8Array(count: number): Uint8Array {
@@ -102,7 +102,16 @@ class SeekableFileReader {
   }
 }
 
+const DAT_HEADER_OFFSET = 0x140;
+
+// internal static readonly uint ObjectSize = ((sizeof(uint) * 0x3E) + sizeof(uint) + (DatFile.ObjectSize * 0x3D));
+const DAT_DIRECTORY_HEADER_OBJECT_SIZE = 0x35A0; // 32 * 62 + 32 + 192 * 61 == 11728 == 0x35A0
+// internal static readonly uint ObjectSize = (sizeof(uint) * 6);
+const DAT_FILE_OBJECT_SIZE = 0xC0; // 32 * 6 == 192 == 0xC0
+
 class DatDatabaseHeader {
+  reader: SeekableFileReader
+
   FileType: number | undefined;
   BlockSize: number | undefined;
   FileSize: number | undefined;
@@ -121,24 +130,20 @@ class DatDatabaseHeader {
   VersionMajor: Uint8Array | undefined;
   VersionMinor: number | undefined;
 
-  constructor() {
-    // TODO
+  constructor(reader: SeekableFileReader) {
+    this.reader = reader;
   }
 
   read(reader: SeekableFileReader) {
     // TODO: Figure out why the other impl skips this data
-    var offset = 256;
-    offset += 64;
-    reader.seek(offset);
+    // ACE has...
+    //   private static readonly uint DAT_HEADER_OFFSET = 0x140; => 320
+    reader.seek(DAT_HEADER_OFFSET);
 
     this.FileType = reader.ReadUInt32();
     this.BlockSize = reader.ReadUInt32();
     this.FileSize = reader.ReadUInt32();
 
-    // TODO: Remember I can try casting this. For now, just read and store
-    // directly
-    //
-    // this.DataSet = (DatDatabaseType)reader.ReadUInt32();
     this.DataSet = reader.ReadUInt32();
     this.DataSubset = reader.ReadUInt32();
 
@@ -164,7 +169,38 @@ class DatDatabaseHeader {
   }
 }
 
-class DatFile {
+class DatDirectoryHeader {
+  reader: SeekableFileReader
+
+  constructor(reader: SeekableFileReader) {
+    this.reader = reader;
+  }
+
+  read(offset: number, objectSize: number, blockSize: number) {
+    // TODO
+  }
+}
+
+class DatDirectory {
+  reader: SeekableFileReader
+
+  RootSectorOffset: number
+  BlockSize: number
+
+  constructor(reader: SeekableFileReader, RootSectorOffset: number, BlockSize: number) {
+    this.reader = reader;
+    this.RootSectorOffset = RootSectorOffset;
+    this.BlockSize = BlockSize;
+  }
+
+  read() {
+    const header = new DatDirectoryHeader(this.reader);
+    // TODO: Implement this
+    // header.read(this.reader);
+  }
+}
+
+class DatDatabase {
   reader: SeekableFileReader
   header: DatDatabaseHeader | undefined
 
@@ -172,9 +208,19 @@ class DatFile {
     this.reader = new SeekableFileReader(path);
   }
 
+  close() {
+    this.reader.close();
+  }
+
   read_header() {
-    this.header = new DatDatabaseHeader();
+    this.header = new DatDatabaseHeader(this.reader);
     this.header.read(this.reader);
+
+    console.log(this.header.debug());
+  }
+
+  get_iteration() {
+    // In each data file, the iteration file has ID '0xFFFF0001'
   }
 
   debug() {
@@ -199,15 +245,14 @@ const main = function () {
     return;
   };
 
-  const reader = new SeekableFileReader(portal_path);
-  const file = new DatFile(portal_path);
+  const file = new DatDatabase(portal_path);
   file.read_header();
 
   // Debugging
   file.debug();
   file.header?.debug();
 
-  reader.close();
+  file.close();
 }
 
 main();

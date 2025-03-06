@@ -123,8 +123,114 @@ class SeekableFileReader {
     return "";
   }
 }
+class DatDirectoryHeader {
+  reader: SeekableFileReader
 
+  constructor(reader: SeekableFileReader) {
+    this.reader = reader;
+  }
 
+  read(offset: number, objectSize: number, blockSize: number) {
+    // TODO
+  }
+}
+
+class DatFile {
+  reader: SeekableFileReader
+
+  constructor(reader: SeekableFileReader) {
+    this.reader = reader;
+  }
+}
+
+// Alternative implementation matching para's
+class DatDirectory {
+  reader: SeekableFileReader
+
+  RootSectorOffset: number
+  BlockSize: number
+
+  folders: Uint32Array<ArrayBufferLike> | null // TODO: Remove null
+  files: FileChunk[]
+  fileCount: number;
+  isLeaf: boolean
+
+  constructor(reader: SeekableFileReader, offset: number, blockSize: number) {
+    this.reader = reader;
+
+    // ACE props
+    this.RootSectorOffset = offset;
+    this.BlockSize = blockSize
+
+    // Para's props
+    this.folders = null;
+    this.files = [];
+    this.fileCount = -1;
+    this.isLeaf = true;
+  }
+
+  debug() {
+    console.log("DatDirectory: " + JSON.stringify(this));
+  }
+
+  read() {
+    console.log(`skipping from ${this.reader.position} to ${this.RootSectorOffset}`);
+    this.reader.position = this.RootSectorOffset;
+
+    let unk = this.reader.ReadUInt32();
+    console.log({ unk: unk })
+
+    // Folders Why 62 here?
+    this.folders = this.reader.ReadUint32Array(62);
+    this.isLeaf = !Boolean(this.folders[0]);
+    this.fileCount = this.reader.ReadInt32();
+
+    let unk2 = this.reader.ReadUInt32();
+    console.log({ unk2: unk2 })
+
+    // Read chunks now?
+    // TODO: Are there really only ever 62 folders?
+    for (let i = 0; i < 61; i++) {
+      // This is my massively simplified but maybe not right code. It seems
+      // to run and produce reasonable values though.
+      let chunk = new FileChunk(this.reader);
+      chunk.read();
+
+      this.files.push(chunk);
+    }
+  }
+}
+
+class FileChunk {
+  reader: SeekableFileReader
+
+  flag: number
+  id: number
+  offset: number
+  size: number
+  time: number
+  version: number
+
+  constructor(reader: SeekableFileReader) {
+    this.reader = reader;
+
+    this.flag = 0;
+    this.id = 0;
+    this.offset = 0;
+    this.size = 0;
+    this.time = 0;
+    this.version = 0;
+  }
+
+  read() {
+    this.flag = this.reader.ReadUInt32();
+    this.id = this.reader.ReadUInt32();
+    this.offset = this.reader.ReadUInt32();
+    this.size = this.reader.ReadUInt32();
+    this.time = this.reader.ReadUInt32();
+    this.version = this.reader.ReadUInt32();
+  }
+}
 
 class DatDatabaseHeader {
   reader: SeekableFileReader
@@ -186,37 +292,6 @@ class DatDatabaseHeader {
   }
 }
 
-class DatDirectoryHeader {
-  reader: SeekableFileReader
-
-  constructor(reader: SeekableFileReader) {
-    this.reader = reader;
-  }
-
-  read(offset: number, objectSize: number, blockSize: number) {
-    // TODO
-  }
-}
-
-class DatDirectory {
-  reader: SeekableFileReader
-
-  RootSectorOffset: number
-  BlockSize: number
-
-  constructor(reader: SeekableFileReader, RootSectorOffset: number, BlockSize: number) {
-    this.reader = reader;
-    this.RootSectorOffset = RootSectorOffset;
-    this.BlockSize = BlockSize;
-  }
-
-  read() {
-    const header = new DatDirectoryHeader(this.reader);
-    // TODO: Implement this
-    // header.read(this.reader);
-  }
-}
-
 class DatDatabase {
   reader: SeekableFileReader
   header: DatDatabaseHeader | undefined
@@ -234,6 +309,23 @@ class DatDatabase {
     this.header.read(this.reader);
 
     console.log(this.header.debug());
+  }
+
+  // WIP
+  find() {
+    // TODO: Clean this up with better type checking
+    if (!this.header || !this.header.BTree || !this.header.BlockSize) {
+      console.log("Header is null, not finding");
+
+      return;
+    }
+
+    var position: number = this.header.BTree
+    console.log(`when find starts, initial position is ${position}`);
+    let dir = new DatDirectory(this.reader, position, this.header.BlockSize)
+    dir.read();
+
+    console.log(dir.debug());
   }
 
   get_iteration() {
@@ -264,10 +356,11 @@ const main = function () {
 
   const file = new DatDatabase(portal_path);
   file.read_header();
+  file.find();
 
   // Debugging
-  file.debug();
-  file.header?.debug();
+  // file.debug();
+  // file.header?.debug();
 
   file.close();
 }

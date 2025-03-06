@@ -105,6 +105,20 @@ class SeekableFileReader {
     return out;
   }
 
+  ReadUint16Array(count: number): Uint16Array {
+    const buf = this.read(count * 2);
+    const out = new Uint16Array(buf);
+
+    return out;
+  }
+
+  ReadUint32Array(count: number): Uint32Array {
+    const buf = this.read(count * 4);
+    const out = new Uint32Array(buf);
+
+    return out;
+  }
+
   ReadString(): string {
     return "";
   }

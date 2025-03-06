@@ -124,7 +124,6 @@ class SeekableFileReader {
   }
 }
 
-const DAT_HEADER_OFFSET = 0x140;
 
 
 class DatDatabaseHeader {

@@ -126,10 +126,6 @@ class SeekableFileReader {
 
 const DAT_HEADER_OFFSET = 0x140;
 
-// internal static readonly uint ObjectSize = ((sizeof(uint) * 0x3E) + sizeof(uint) + (DatFile.ObjectSize * 0x3D));
-const DAT_DIRECTORY_HEADER_OBJECT_SIZE = 0x35A0; // 32 * 62 + 32 + 192 * 61 == 11728 == 0x35A0
-// internal static readonly uint ObjectSize = (sizeof(uint) * 6);
-const DAT_FILE_OBJECT_SIZE = 0xC0; // 32 * 6 == 192 == 0xC0
 
 class DatDatabaseHeader {
   reader: SeekableFileReader

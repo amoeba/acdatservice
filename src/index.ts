@@ -3,10 +3,85 @@ const fs = require('fs');
 const DAT_HEADER_OFFSET = 0x140;
 
 // internal static readonly uint ObjectSize = ((sizeof(uint) * 0x3E) + sizeof(uint) + (DatFile.ObjectSize * 0x3D));
-const DAT_DIRECTORY_HEADER_OBJECT_SIZE = 0x35A0; // 32 * 62 + 32 + 192 * 61 == 11728 == 0x35A0
+const DAT_DIRECTORY_HEADER_OBJECT_SIZE = 0x6B4; // 4 * 62 + 4 + 24 * 61 == 1716
 // internal static readonly uint ObjectSize = (sizeof(uint) * 6);
-const DAT_FILE_OBJECT_SIZE = 0xC0; // 32 * 6 == 192 == 0xC0
+const DAT_FILE_OBJECT_SIZE = 0xC0; // 4 * 6 == 24 == 0xC0
 
+class BinaryReader {
+  buffer: ArrayBufferLike
+  position: number
+
+  constructor(buffer: ArrayBufferLike) {
+    this.buffer = buffer;
+    this.position = 0;
+  }
+
+  read(length: number): ArrayBufferLike {
+    let view = new DataView(this.buffer, this.position, length);
+    this.position += length;
+
+    return view.buffer;
+  }
+
+  ReadInt8(): number {
+    let view = new DataView(this.buffer, this.position);
+    this.position += 1;
+    return view.getInt8(0);
+  }
+
+  ReadInt16(): number {
+    let view = new DataView(this.buffer, this.position);
+    this.position += 2;
+    return view.getInt16(0, true);
+  }
+
+  ReadInt32(): number {
+    let view = new DataView(this.buffer, this.position);
+    this.position += 4;
+
+    return view.getInt32(0, true);
+  }
+
+  ReadUint8(): number {
+    let view = new DataView(this.buffer, this.position);
+    this.position += 1;
+    return view.getUint8(0);
+  }
+
+  ReadUint16(): number {
+    let view = new DataView(this.buffer, this.position);
+    this.position += 2;
+    return view.getUint16(0, true);
+  }
+
+  ReadUint32(): number {
+    let view = new DataView(this.buffer, this.position);
+    this.position += 4;
+
+    return view.getUint32(0, true);
+  }
+
+  ReadUint8Array(length: number): Uint32Array {
+    const buf = this.read(length);
+    const out = new Uint32Array(buf);
+
+    return out;
+  }
+
+  ReadUint16Array(length: number): Uint32Array {
+    const buf = this.read(length * 2);
+    const out = new Uint32Array(buf);
+
+    return out;
+  }
+
+  ReadUint32Array(length: number): Uint32Array {
+    const buf = this.read(length * 4);
+    const out = new Uint32Array(buf);
+
+    return out;
+  }
+}
 
 class SeekableFileReader {
   filePath: string;
@@ -119,54 +194,133 @@ class SeekableFileReader {
     return out;
   }
 
+  // TODO
   ReadString(): string {
-    return "";
+    return "TODO";
   }
 }
-class DatDirectoryHeader {
-  reader: SeekableFileReader
 
-  constructor(reader: SeekableFileReader) {
-    this.reader = reader;
+class DatDirectoryHeader {
+  buffer: Uint8Array
+  reader: BinaryReader
+
+  branches: Uint32Array
+  entryCount: number | undefined
+  entries: DatFile[]
+
+  constructor(buffer: Uint8Array) {
+    console.log({ buffer: buffer })
+    this.buffer = buffer;
+    this.reader = new BinaryReader(buffer.buffer);
+
+    this.branches = new Uint32Array(62);
+    this.entries = [];
   }
 
-  read(offset: number, objectSize: number, blockSize: number) {
-    // TODO
+  unpack() {
+    for (let i = 0; i < this.branches.length; i++) {
+      this.branches[i] = this.reader.ReadUint32();
+    }
+
+    console.log({ branches: this.branches })
+
+    this.entryCount = this.reader.ReadUint32();
+
+    console.log(`entryCount is ${this.entryCount}`);
+
+    for (let i = 0; i < this.entryCount; i++) {
+      this.entries[i] = new DatFile();
+      this.entries[i].unpack(this.reader);
+    }
+
+
+    // let unk = this.reader.ReadUint32();
+
+    // Folders Why 62 here?
+    // this.branches = this.reader.ReadUint32Array(62);
+    // this.entryCount = this.reader.ReadInt32();
+
+    // let unk2 = this.reader.ReadUint32();
   }
 }
 
 class DatFile {
+  BitFlags: number | undefined
+  ObjectId: number | undefined
+  FileOffset: number | undefined
+  FileSize: number | undefined
+  Date: number | undefined
+  Iteration: number | undefined
+
+  unpack(reader: BinaryReader) {
+    this.BitFlags = reader.ReadUint32();
+    this.ObjectId = reader.ReadUint32();
+    this.FileOffset = reader.ReadUint32();
+    this.FileSize = reader.ReadUint32();
+    this.Date = reader.ReadUint32();
+    this.Iteration = reader.ReadUint32();
+  }
+}
+
+class DatReader {
   reader: SeekableFileReader
+  buffer: Buffer | undefined
 
   constructor(reader: SeekableFileReader) {
     this.reader = reader;
   }
-}
 
-// Alternative implementation matching para's
+  read(offset: number, size: number, blockSize: number) {
+    // init buffer
+    let buffer = new Uint8Array(size);
+    this.reader.position = offset;
+
+    let nextAddress = this.getNextAdress();
+    let bufferOffset = 0;
+
+    while (size > 0) {
+      if (size < blockSize) {
+        buffer.set(this.reader.ReadUint8Array(size), bufferOffset);
+
+        // We can quit looping now since we've read to the end
+        break;
+      } else {
+        // stream.Read(buffer, bufferOffset, Convert.ToInt32(blockSize) - 4); // Read in our sector into the buffer[]
+        buffer.set(this.reader.ReadUint8Array(blockSize - 4), bufferOffset);
+        // bufferOffset += Convert.ToInt32(blockSize) - 4; // Adjust this so we know where in our buffer[] the next sector gets appended to
+        bufferOffset += blockSize - 4;
+        // stream.Seek(nextAddress, SeekOrigin.Begin); // Move the file pointer to the start of the next sector we read above.
+        this.reader.position = nextAddress;
+        // nextAddress = GetNextAddress(stream, 0); // Get the start location of the next sector.
+        nextAddress = this.getNextAdress();
+        // size -= (blockSize - 4); // Decrease this by the amount of data we just read into buffer[] so we know how much more to go
+        size -= blockSize - 4;
+      }
+    }
+
+    return buffer;
+  }
+
+  getNextAdress(): number {
+    return this.reader.ReadUInt32();
+  }
+}
 class DatDirectory {
   reader: SeekableFileReader
 
   RootSectorOffset: number
   BlockSize: number
 
-  folders: Uint32Array<ArrayBufferLike> | null // TODO: Remove null
-  files: FileChunk[]
-  fileCount: number;
-  isLeaf: boolean
+  header: DatDirectoryHeader | undefined
+  directories: DatDirectory[]
 
   constructor(reader: SeekableFileReader, offset: number, blockSize: number) {
     this.reader = reader;
 
-    // ACE props
     this.RootSectorOffset = offset;
     this.BlockSize = blockSize
 
-    // Para's props
-    this.folders = null;
-    this.files = [];
-    this.fileCount = -1;
-    this.isLeaf = true;
+    this.directories = []
   }
 
   debug() {
@@ -174,30 +328,51 @@ class DatDirectory {
   }
 
   read() {
-    console.log(`skipping from ${this.reader.position} to ${this.RootSectorOffset}`);
-    this.reader.position = this.RootSectorOffset;
+    // This looks right so far
+    let reader = new DatReader(this.reader).read(this.RootSectorOffset, DAT_DIRECTORY_HEADER_OBJECT_SIZE, this.BlockSize);
+    let header = new DatDirectoryHeader(reader);
+    header.unpack();
 
-    let unk = this.reader.ReadUInt32();
-    console.log({ unk: unk })
+    console.log({ header: header })
 
-    // Folders Why 62 here?
-    this.folders = this.reader.ReadUint32Array(62);
-    this.isLeaf = !Boolean(this.folders[0]);
-    this.fileCount = this.reader.ReadInt32();
+    if (!this.header) {
+      return;
+    }
 
-    let unk2 = this.reader.ReadUInt32();
-    console.log({ unk2: unk2 })
+    console.log(this.header?.branches);
 
-    // Read chunks now?
-    // TODO: Are there really only ever 62 folders?
-    for (let i = 0; i < 61; i++) {
+    // Stop reading if this is a leaf directory
+    if (this.isLeaf()) {
+      console.log("DatDirectory: isLeaf");
+      return;
+    }
+
+    if (!this.header || !this.header.entryCount || !this.header.branches) {
+      console.log("early return, this shouldn't happen");
+
+      return;
+    }
+
+
+    // Why entryCount + 1 here?
+    for (let i = 0; i < this.header.entryCount + 1; i++) {
       // This is my massively simplified but maybe not right code. It seems
       // to run and produce reasonable values though.
-      let chunk = new FileChunk(this.reader);
-      chunk.read();
+      // let chunk = new FileChunk(this.reader);
+      // chunk.read();
 
-      this.files.push(chunk);
+      let dir = new DatDirectory(this.reader, this.header.branches[i], this.BlockSize)
+      dir.read();
+      this.directories.push(dir);
     }
+  }
+
+  isLeaf() {
+    if (!this.header) {
+      return false;
+    }
+
+    return !this.header.branches || this.header.branches[0] == 0
   }
 }
 
@@ -295,6 +470,7 @@ class DatDatabaseHeader {
 class DatDatabase {
   reader: SeekableFileReader
   header: DatDatabaseHeader | undefined
+  rootDir: DatDirectory | undefined
 
   constructor(path: string) {
     this.reader = new SeekableFileReader(path);
@@ -307,12 +483,10 @@ class DatDatabase {
   read_header() {
     this.header = new DatDatabaseHeader(this.reader);
     this.header.read(this.reader);
-
-    console.log(this.header.debug());
   }
 
   // WIP
-  find() {
+  read() {
     // TODO: Clean this up with better type checking
     if (!this.header || !this.header.BTree || !this.header.BlockSize) {
       console.log("Header is null, not finding");
@@ -322,10 +496,8 @@ class DatDatabase {
 
     var position: number = this.header.BTree
     console.log(`when find starts, initial position is ${position}`);
-    let dir = new DatDirectory(this.reader, position, this.header.BlockSize)
-    dir.read();
-
-    console.log(dir.debug());
+    this.rootDir = new DatDirectory(this.reader, position, this.header.BlockSize)
+    this.rootDir.read();
   }
 
   get_iteration() {
@@ -355,8 +527,9 @@ const main = function () {
   };
 
   const file = new DatDatabase(portal_path);
+
   file.read_header();
-  file.find();
+  file.read();
 
   // Debugging
   // file.debug();

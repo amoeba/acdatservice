@@ -7,7 +7,7 @@ const DAT_DIRECTORY_HEADER_OBJECT_SIZE = 0x6B4; // 4 * 62 + 4 + 24 * 61 == 1716
 // internal static readonly uint ObjectSize = (sizeof(uint) * 6);
 const DAT_FILE_OBJECT_SIZE = 0xC0; // 4 * 6 == 24 == 0xC0
 
-class BinaryReader {
+export class BinaryReader {
   buffer: ArrayBufferLike
   position: number
 

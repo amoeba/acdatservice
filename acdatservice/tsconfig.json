@@ -17,7 +17,6 @@
     "src/**/*"
   ],
   "exclude": [
-    "r2-worker",
     "node_modules",
     "**/*.test.ts"
   ]

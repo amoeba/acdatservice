@@ -239,7 +239,6 @@ class DatFile {
   Iteration: number | undefined
 
   unpack(reader: BinaryReader) {
-    console.log("datfile")
     this.BitFlags = reader.ReadUint32();
     this.ObjectId = reader.ReadUint32();
     this.FileOffset = reader.ReadUint32();
@@ -311,10 +310,6 @@ class DatDirectory {
     this.directories = []
   }
 
-  debug() {
-    console.log("DatDirectory: " + JSON.stringify(this));
-  }
-
   read() {
     // Take care of header
     let reader = new DatReader(this.reader).read(this.RootSectorOffset, DAT_DIRECTORY_HEADER_OBJECT_SIZE, this.BlockSize);
@@ -338,13 +333,7 @@ class DatDirectory {
     }
 
 
-    // Why entryCount + 1 here?
     for (let i = 0; i < this.header.entryCount + 1; i++) {
-      // This is my massively simplified but maybe not right code. It seems
-      // to run and produce reasonable values though.
-      // let chunk = new FileChunk(this.reader);
-      // chunk.read();
-
       let dir = new DatDirectory(this.reader, this.header.branches[i], this.BlockSize)
       dir.read();
 
@@ -447,10 +436,6 @@ class DatDatabaseHeader {
     this.VersionMajor = reader.ReadUint8Array(16);
     this.VersionMinor = reader.ReadUInt32();
   }
-
-  debug() {
-    console.log("DatFileHeader: " + JSON.stringify(this));
-  }
 }
 
 class DatDatabase {
@@ -471,29 +456,23 @@ class DatDatabase {
     this.header.read(this.reader);
   }
 
-  // WIP
   read() {
     // TODO: Clean this up with better type checking
     if (!this.header || !this.header.BTree || !this.header.BlockSize) {
-      console.log("Header is null, not finding");
+      console.log("[WARN] Header is null, not finding");
 
       return;
     }
 
     var position: number = this.header.BTree
-    console.log(`when find starts, initial position is ${position}`);
     this.rootDir = new DatDirectory(this.reader, position, this.header.BlockSize)
     this.rootDir.read();
   }
 
+  // TODO
   get_iteration() {
     // In each data file, the iteration file has ID '0xFFFF0001'
   }
-
-  debug() {
-    console.log("DatFile: " + JSON.stringify(this));
-  }
-
 }
 
 const main = function () {
@@ -516,11 +495,6 @@ const main = function () {
 
   file.read_header();
   file.read();
-
-  // Debugging
-  // file.debug();
-  // file.header?.debug();
-
   file.close();
 }
 

@@ -69,21 +69,21 @@ export default class SeekableFileReader {
     return view.getInt32(0, true);
   }
 
-  ReadUInt8(): number {
+  ReadUint8(): number {
     const buf = this.read(1);
     const view = new DataView(buf.buffer);
 
     return view.getUint8(0);
   }
 
-  ReadUInt16(): number {
+  ReadUint16(): number {
     const buf = this.read(2);
     const view = new DataView(buf.buffer);
 
     return view.getUint16(0, true);
   }
 
-  ReadUInt32(): number {
+  ReadUint32(): number {
     const buf = this.read(4);
     const view = new DataView(buf.buffer);
 

@@ -96,7 +96,7 @@ class DatReader {
   }
 
   getNextAdress(): number {
-    return this.reader.ReadUInt32();
+    return this.reader.ReadUint32();
   }
 }
 
@@ -181,12 +181,12 @@ class FileChunk {
   }
 
   read() {
-    this.flag = this.reader.ReadUInt32();
-    this.id = this.reader.ReadUInt32();
-    this.offset = this.reader.ReadUInt32();
-    this.size = this.reader.ReadUInt32();
-    this.time = this.reader.ReadUInt32();
-    this.version = this.reader.ReadUInt32();
+    this.flag = this.reader.ReadUint32();
+    this.id = this.reader.ReadUint32();
+    this.offset = this.reader.ReadUint32();
+    this.size = this.reader.ReadUint32();
+    this.time = this.reader.ReadUint32();
+    this.version = this.reader.ReadUint32();
   }
 }
 
@@ -221,28 +221,28 @@ class DatDatabaseHeader {
     //   private static readonly uint DAT_HEADER_OFFSET = 0x140; => 320
     reader.seek(DAT_HEADER_OFFSET);
 
-    this.FileType = reader.ReadUInt32();
-    this.BlockSize = reader.ReadUInt32();
-    this.FileSize = reader.ReadUInt32();
+    this.FileType = reader.ReadUint32();
+    this.BlockSize = reader.ReadUint32();
+    this.FileSize = reader.ReadUint32();
 
-    this.DataSet = reader.ReadUInt32();
-    this.DataSubset = reader.ReadUInt32();
+    this.DataSet = reader.ReadUint32();
+    this.DataSubset = reader.ReadUint32();
 
-    this.FreeHead = reader.ReadUInt32();
-    this.FreeTail = reader.ReadUInt32();
-    this.FreeCount = reader.ReadUInt32();
-    this.BTree = reader.ReadUInt32();
+    this.FreeHead = reader.ReadUint32();
+    this.FreeTail = reader.ReadUint32();
+    this.FreeCount = reader.ReadUint32();
+    this.BTree = reader.ReadUint32();
 
-    this.NewLRU = reader.ReadUInt32();
-    this.OldLRU = reader.ReadUInt32();
-    this.UseLRU = (reader.ReadUInt32() == 1);
+    this.NewLRU = reader.ReadUint32();
+    this.OldLRU = reader.ReadUint32();
+    this.UseLRU = (reader.ReadUint32() == 1);
 
-    this.MasterMapID = reader.ReadUInt32();
+    this.MasterMapID = reader.ReadUint32();
 
-    this.EnginePackVersion = reader.ReadUInt32();
-    this.GamePackVersion = reader.ReadUInt32();
+    this.EnginePackVersion = reader.ReadUint32();
+    this.GamePackVersion = reader.ReadUint32();
     this.VersionMajor = reader.ReadUint8Array(16);
-    this.VersionMinor = reader.ReadUInt32();
+    this.VersionMinor = reader.ReadUint32();
   }
 }
 

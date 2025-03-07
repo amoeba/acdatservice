@@ -1,6 +1,6 @@
 
-import BinaryReader from '../src/binary_reader';
-import SeekableFileReader from '../src/seekable_file_reader';
+import BinaryReader from './binary_reader';
+import SeekableFileReader from './seekable_file_reader';
 
 test('BinaryReader smoke test', () => {
   // WIP

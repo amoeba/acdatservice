@@ -209,7 +209,6 @@ class DatDirectoryHeader {
   entries: DatFile[]
 
   constructor(buffer: Uint8Array) {
-    console.log({ buffer: buffer })
     this.buffer = buffer;
     this.reader = new BinaryReader(buffer.buffer);
 
@@ -222,25 +221,12 @@ class DatDirectoryHeader {
       this.branches[i] = this.reader.ReadUint32();
     }
 
-    console.log({ branches: this.branches })
-
     this.entryCount = this.reader.ReadUint32();
-
-    console.log(`entryCount is ${this.entryCount}`);
 
     for (let i = 0; i < this.entryCount; i++) {
       this.entries[i] = new DatFile();
       this.entries[i].unpack(this.reader);
     }
-
-
-    // let unk = this.reader.ReadUint32();
-
-    // Folders Why 62 here?
-    // this.branches = this.reader.ReadUint32Array(62);
-    // this.entryCount = this.reader.ReadInt32();
-
-    // let unk2 = this.reader.ReadUint32();
   }
 }
 
@@ -253,6 +239,7 @@ class DatFile {
   Iteration: number | undefined
 
   unpack(reader: BinaryReader) {
+    console.log("datfile")
     this.BitFlags = reader.ReadUint32();
     this.ObjectId = reader.ReadUint32();
     this.FileOffset = reader.ReadUint32();
@@ -305,6 +292,7 @@ class DatReader {
     return this.reader.ReadUInt32();
   }
 }
+
 class DatDirectory {
   reader: SeekableFileReader
 
@@ -328,27 +316,23 @@ class DatDirectory {
   }
 
   read() {
-    // This looks right so far
+    // Take care of header
     let reader = new DatReader(this.reader).read(this.RootSectorOffset, DAT_DIRECTORY_HEADER_OBJECT_SIZE, this.BlockSize);
-    let header = new DatDirectoryHeader(reader);
-    header.unpack();
-
-    console.log({ header: header })
+    this.header = new DatDirectoryHeader(reader);
+    this.header.unpack();
 
     if (!this.header) {
       return;
     }
 
-    console.log(this.header?.branches);
-
     // Stop reading if this is a leaf directory
     if (this.isLeaf()) {
-      console.log("DatDirectory: isLeaf");
+      console.log("[INFO] DatDirectory: isLeaf");
       return;
     }
 
     if (!this.header || !this.header.entryCount || !this.header.branches) {
-      console.log("early return, this shouldn't happen");
+      console.log("[WARN] early return, this shouldn't happen");
 
       return;
     }
@@ -363,10 +347,12 @@ class DatDirectory {
 
       let dir = new DatDirectory(this.reader, this.header.branches[i], this.BlockSize)
       dir.read();
+
       this.directories.push(dir);
     }
   }
 
+  // TODO: This is super gross right now
   isLeaf() {
     if (!this.header) {
       return false;

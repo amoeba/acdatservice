@@ -1,5 +1,6 @@
 
 import BinaryReader from '../src/binary_reader';
+import SeekableFileReader from '../src/seekable_file_reader';
 
 test('BinaryReader smoke test', () => {
   // WIP
@@ -14,4 +15,11 @@ test('BinaryReader smoke test', () => {
   let result = reader.ReadUint32();
 
   expect(result).toBe(4);
+});
+
+
+test('SeekableFileReader smoke test', () => {
+  // TODO
+
+  expect(2).toBe(4);
 });

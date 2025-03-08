@@ -109,13 +109,18 @@ class DatDirectory {
   header: DatDirectoryHeader | undefined
   directories: DatDirectory[]
 
+  entries: DatFile[]
+
   constructor(reader: SeekableFileReader, offset: number, blockSize: number) {
     this.reader = reader;
 
     this.RootSectorOffset = offset;
-    this.BlockSize = blockSize
+    this.BlockSize = blockSize;
 
-    this.directories = []
+    this.directories = [];
+
+    // WIP
+    this.entries = [];
   }
 
   read() {
@@ -124,19 +129,24 @@ class DatDirectory {
     this.header = new DatDirectoryHeader(reader);
     this.header.unpack();
 
+    // WIP
+    for (let i = 0; i < this.header.entries.length; i++) {
+      this.entries.push(this.header.entries[i]);
+    }
+
     if (!this.header) {
-      return;
+      return [];
     }
 
     // Stop reading if this is a leaf directory
     if (this.isLeaf()) {
-      return;
+      return [];
     }
 
     if (!this.header || !this.header.entryCount || !this.header.branches) {
       console.log("[WARN] early return, this shouldn't happen");
 
-      return;
+      return [];
     }
 
     for (let i = 0; i < this.header.entryCount + 1; i++) {

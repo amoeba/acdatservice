@@ -165,6 +165,28 @@ class DatDirectory {
 
     return !this.header.branches || this.header.branches[0] == 0
   }
+
+  iter() {
+    console.log("iter")
+
+    let queue = []
+    let files = [];
+
+    // Populate initial set
+    queue.push(...this.directories);
+    files.push(...this.entries);
+
+    while (queue.length > 0) {
+      let d = queue.pop();
+      if (!d) { continue }
+      files.push(...this.entries);
+      queue.push(...d?.directories);
+    }
+
+    console.log(files.length);
+
+    return files;
+  }
 }
 
 class DatDatabaseHeader {

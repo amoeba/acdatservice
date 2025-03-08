@@ -5,10 +5,10 @@ export default class SeekableFileReader {
   fd: any;
   position: number
 
-  constructor(filePath: string) {
+  constructor(filePath: string, position: number = 0) {
     this.filePath = filePath;
     this.fd = null;
-    this.position = 0;
+    this.position = position;
   }
 
   open() {

@@ -130,7 +130,6 @@ class DatDirectory {
 
     // Stop reading if this is a leaf directory
     if (this.isLeaf()) {
-      console.log("[INFO] DatDirectory: isLeaf");
       return;
     }
 
@@ -139,7 +138,6 @@ class DatDirectory {
 
       return;
     }
-
 
     for (let i = 0; i < this.header.entryCount + 1; i++) {
       let dir = new DatDirectory(this.reader, this.header.branches[i], this.BlockSize)

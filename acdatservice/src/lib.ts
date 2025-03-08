@@ -157,37 +157,6 @@ class DatDirectory {
   }
 }
 
-class FileChunk {
-  reader: SeekableFileReader
-
-  flag: number
-  id: number
-  offset: number
-  size: number
-  time: number
-  version: number
-
-  constructor(reader: SeekableFileReader) {
-    this.reader = reader;
-
-    this.flag = 0;
-    this.id = 0;
-    this.offset = 0;
-    this.size = 0;
-    this.time = 0;
-    this.version = 0;
-  }
-
-  read() {
-    this.flag = this.reader.ReadUint32();
-    this.id = this.reader.ReadUint32();
-    this.offset = this.reader.ReadUint32();
-    this.size = this.reader.ReadUint32();
-    this.time = this.reader.ReadUint32();
-    this.version = this.reader.ReadUint32();
-  }
-}
-
 class DatDatabaseHeader {
   reader: SeekableFileReader
 

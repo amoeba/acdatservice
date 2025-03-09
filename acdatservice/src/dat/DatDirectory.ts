@@ -31,18 +31,18 @@ export class DatDirectory {
     this.header.unpack(rdr);
 
     if (!this.header) {
-      return [];
+      return;
     }
 
     // Stop reading if this is a leaf directory
     if (this.isLeaf()) {
-      return [];
+      return;
     }
 
     if (!this.header || !this.header.entryCount || !this.header.branches) {
       console.log("[WARN] early return, this shouldn't happen");
 
-      return [];
+      return;
     }
 
     for (let i = 0; i < this.header.entryCount + 1; i++) {

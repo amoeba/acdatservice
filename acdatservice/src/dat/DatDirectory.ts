@@ -25,13 +25,10 @@ export class DatDirectory {
   }
 
   read() {
-    // Take care of header
     let reader = new DatReader(this.reader).read(this.RootSectorOffset, DAT_DIRECTORY_HEADER_OBJECT_SIZE, this.BlockSize);
     this.header = new DatDirectoryHeader();
     let rdr = new BinaryReader(reader.buffer);
     this.header.unpack(rdr);
-
-    // console.log({ entries: this.header.entries?.length, branches: this.header.branches })
 
     if (!this.header) {
       return [];
@@ -64,22 +61,6 @@ export class DatDirectory {
 
     return !this.header.branches || this.header.branches[0] == 0
   }
-
-  // iter(): DatFile[] {
-  //   let files = [];
-  //   let queue = []
-
-  //   queue.push(...this.directories);
-
-  //   while (queue.length > 0) {
-  //     let d = queue.pop();
-  //     if (!d) { continue }
-  //     // files.push(...this.entries);
-  //     queue.push(...d?.directories);
-  //   }
-
-  //   return files;
-  // }
 
   files(dest: DatFile[]) {
     if (!this.header || !this.header.entryCount || !this.header.entries) {

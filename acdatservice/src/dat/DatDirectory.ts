@@ -25,10 +25,10 @@ export class DatDirectory {
   }
 
   read() {
-    let reader = new DatReader(this.reader).read(this.RootSectorOffset, DAT_DIRECTORY_HEADER_OBJECT_SIZE, this.BlockSize);
+    let dat_reader = new DatReader(this.reader).read(this.RootSectorOffset, DAT_DIRECTORY_HEADER_OBJECT_SIZE, this.BlockSize);
     this.header = new DatDirectoryHeader();
-    let rdr = new BinaryReader(reader.buffer);
-    this.header.unpack(rdr);
+    let header_reader = new BinaryReader(dat_reader.buffer);
+    this.header.unpack(header_reader);
 
     if (!this.header) {
       return;

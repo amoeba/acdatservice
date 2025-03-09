@@ -12,7 +12,7 @@ export class DatDirectory {
   RootSectorOffset: number
   BlockSize: number
 
-  header: DatDirectoryHeader | undefined
+  header: DatDirectoryHeader
   directories: DatDirectory[]
 
   constructor(reader: SeekableFileReader, offset: number, blockSize: number) {
@@ -21,27 +21,17 @@ export class DatDirectory {
     this.RootSectorOffset = offset;
     this.BlockSize = blockSize;
 
+    this.header = new DatDirectoryHeader();
     this.directories = [];
   }
 
   read() {
     let dat_reader = new DatReader(this.reader).read(this.RootSectorOffset, DAT_DIRECTORY_HEADER_OBJECT_SIZE, this.BlockSize);
-    this.header = new DatDirectoryHeader();
     let header_reader = new BinaryReader(dat_reader.buffer);
     this.header.unpack(header_reader);
 
-    if (!this.header) {
-      return;
-    }
-
     // Stop reading if this is a leaf directory
     if (this.isLeaf()) {
-      return;
-    }
-
-    if (!this.header || !this.header.entryCount || !this.header.branches) {
-      console.log("[WARN] early return, this shouldn't happen");
-
       return;
     }
 

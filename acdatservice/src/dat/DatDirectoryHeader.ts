@@ -2,14 +2,14 @@ import BinaryReader from "../binary_reader"
 import { DatFile } from "./DatFile"
 
 export class DatDirectoryHeader {
-  reader: BinaryReader | undefined
-
   branches: Uint32Array
-  entryCount: number | undefined
-  entries: DatFile[] | undefined
+  entryCount: number
+  entries: DatFile[]
 
   constructor() {
     this.branches = new Uint32Array(62);
+    this.entryCount = 0;
+    this.entries = [];
   }
 
   unpack(reader: BinaryReader) {
@@ -18,8 +18,6 @@ export class DatDirectoryHeader {
     }
 
     this.entryCount = reader.ReadUint32();
-
-    this.entries = [];
 
     for (let i = 0; i < this.entryCount; i++) {
       this.entries[i] = new DatFile();

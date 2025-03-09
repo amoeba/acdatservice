@@ -6,7 +6,7 @@
   "$schema": "node_modules/wrangler/config-schema.json",
   "name": "r2-worker",
   "main": "src/index.ts",
-  "compatibility_date": "2025-02-24",
+  "compatibility_date": "2025-03-08",
   "observability": {
     "enabled": true
   },

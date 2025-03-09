@@ -1,6 +1,6 @@
 import SeekableFileReader from "../seekable_file_reader";
 
-export class PortalIcon {
+export class Texture {
   width: number | undefined
   height: number | undefined
   format: number | undefined

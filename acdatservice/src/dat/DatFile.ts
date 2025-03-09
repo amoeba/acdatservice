@@ -24,7 +24,7 @@ export class DatFile {
       return DatFileType.Unknown
     }
 
-    if (this.ObjectId >= 0x00 && this.ObjectId < 0x00) {
+    if (this.ObjectId >= 0x06000000 && this.ObjectId <= 0x07FFFFFF) {
       return DatFileType.Texture
     } else {
       return DatFileType.Unknown

@@ -43,20 +43,11 @@ export class DatDirectory {
     }
   }
 
-  // TODO: This is super gross right now
   isLeaf() {
-    if (!this.header) {
-      return false;
-    }
-
-    return !this.header.branches || this.header.branches[0] == 0
+    return this.header.branches[0] == 0
   }
 
   files(dest: DatFile[]) {
-    if (!this.header || !this.header.entryCount || !this.header.entries) {
-      throw new Error("TODO");
-    }
-
     this.directories.forEach(d => d.files(dest));
 
     for (let i = 0; i < this.header.entryCount; i++) {

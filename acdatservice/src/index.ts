@@ -14,7 +14,6 @@ const exportIcons = function (portal_path: string, files: DatFile[], path: strin
   }
 
   for (let i = 0; i < files.length; i++) {
-    console.log(i);
     let file = files[i];
 
     if (file.type() != DatFileType.Texture) {

@@ -55,8 +55,6 @@ const main = function () {
   let files: DatFile[] = [];
   db.rootDir?.files(files);
   db.close();
-
-  exportIcons(portal_path, files, "export2");
 }
 
 main();

@@ -1,4 +1,5 @@
 import BinaryReader from "./binary_reader"
+import { DatFileType } from "./DatFileType"
 
 export class DatFile {
   BitFlags: number | undefined
@@ -16,5 +17,17 @@ export class DatFile {
     this.FileSize = reader.ReadUint32();
     this.Date = reader.ReadUint32();
     this.Iteration = reader.ReadUint32();
+  }
+
+  type(): DatFileType {
+    if (!this.ObjectId) {
+      return DatFileType.Unknown
+    }
+
+    if (this.ObjectId >= 0x00 && this.ObjectId < 0x00) {
+      return DatFileType.Texture
+    } else {
+      return DatFileType.Unknown
+    }
   }
 }

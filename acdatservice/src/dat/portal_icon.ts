@@ -1,4 +1,4 @@
-import SeekableFileReader from "./seekable_file_reader";
+import SeekableFileReader from "../seekable_file_reader";
 
 export class PortalIcon {
   width: number | undefined

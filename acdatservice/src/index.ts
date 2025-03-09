@@ -5,6 +5,7 @@ import { DatDatabase } from "./dat/DatDatabase";
 import { Texture } from "./dat/Texture";
 import SeekableFileReader from "./seekable_file_reader";
 import { DatFileType } from "./dat/DatFileType";
+import { DatFile } from "./dat/DatFile";
 
 const main = function () {
   const portal_path = "/Users/bryce/src/ACEmulator/ACE/Dats/client_portal.dat";
@@ -22,12 +23,12 @@ const main = function () {
     return;
   };
 
-  const file = new DatDatabase(portal_path);
-
-  file.read();
-
-  let files = file.rootDir?.iter();
-  console.log({ len: files?.length });
+  const db = new DatDatabase(portal_path);
+  db.read();
+  let result: DatFile[] = [];
+  db.rootDir?.files(result);
+  console.log({ res: result.length });
+  // let files = file.rootDir?.iter();
 
   // if (files) {
   //   for (let i = 0; i < files.length; i++) {
@@ -53,7 +54,7 @@ const main = function () {
   //   }
   // }
 
-  file.close();
+  db.close();
 }
 
 main();

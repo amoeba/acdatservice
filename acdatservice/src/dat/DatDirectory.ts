@@ -15,8 +15,6 @@ export class DatDirectory {
   header: DatDirectoryHeader | undefined
   directories: DatDirectory[]
 
-  entries: DatFile[]
-
   constructor(reader: SeekableFileReader, offset: number, blockSize: number) {
     this.reader = reader;
 
@@ -24,9 +22,6 @@ export class DatDirectory {
     this.BlockSize = blockSize;
 
     this.directories = [];
-
-    // WIP
-    this.entries = [];
   }
 
   read() {
@@ -36,32 +31,29 @@ export class DatDirectory {
     let rdr = new BinaryReader(reader.buffer);
     this.header.unpack(rdr);
 
-    console.log({ entries: this.header.entries?.length, branches: this.header.branches })
-    return;
+    // console.log({ entries: this.header.entries?.length, branches: this.header.branches })
 
-    // this.entries.push(...this.header.entries);
+    if (!this.header) {
+      return [];
+    }
 
-    // if (!this.header) {
-    //   return [];
-    // }
+    // Stop reading if this is a leaf directory
+    if (this.isLeaf()) {
+      return [];
+    }
 
-    // // Stop reading if this is a leaf directory
-    // if (this.isLeaf()) {
-    //   return [];
-    // }
+    if (!this.header || !this.header.entryCount || !this.header.branches) {
+      console.log("[WARN] early return, this shouldn't happen");
 
-    // if (!this.header || !this.header.entryCount || !this.header.branches) {
-    //   console.log("[WARN] early return, this shouldn't happen");
+      return [];
+    }
 
-    //   return [];
-    // }
+    for (let i = 0; i < this.header.entryCount + 1; i++) {
+      let dir = new DatDirectory(this.reader, this.header.branches[i], this.BlockSize)
+      dir.read();
 
-    // for (let i = 0; i < this.header.entryCount + 1; i++) {
-    //   let dir = new DatDirectory(this.reader, this.header.branches[i], this.BlockSize)
-    //   dir.read();
-
-    //   this.directories.push(dir);
-    // }
+      this.directories.push(dir);
+    }
   }
 
   // TODO: This is super gross right now
@@ -73,19 +65,33 @@ export class DatDirectory {
     return !this.header.branches || this.header.branches[0] == 0
   }
 
-  iter(): DatFile[] {
-    let files = [];
-    let queue = []
+  // iter(): DatFile[] {
+  //   let files = [];
+  //   let queue = []
 
-    queue.push(...this.directories);
+  //   queue.push(...this.directories);
 
-    while (queue.length > 0) {
-      let d = queue.pop();
-      if (!d) { continue }
-      files.push(...this.entries);
-      queue.push(...d?.directories);
+  //   while (queue.length > 0) {
+  //     let d = queue.pop();
+  //     if (!d) { continue }
+  //     // files.push(...this.entries);
+  //     queue.push(...d?.directories);
+  //   }
+
+  //   return files;
+  // }
+
+  files(dest: DatFile[]) {
+    if (!this.header || !this.header.entryCount || !this.header.entries) {
+      throw new Error("TODO");
     }
 
-    return files;
+    this.directories.forEach(d => d.files(dest));
+
+    for (let i = 0; i < this.header.entryCount; i++) {
+      dest.push(this.header.entries[i]);
+    }
+
+    return dest;
   }
 }

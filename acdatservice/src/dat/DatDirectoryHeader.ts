@@ -1,4 +1,4 @@
-import BinaryReader from "./binary_reader"
+import BinaryReader from "../binary_reader"
 import { DatFile } from "./DatFile"
 
 export class DatDirectoryHeader {

@@ -1,7 +1,7 @@
 import { DatDirectoryHeader } from "./DatDirectoryHeader"
 import { DatFile } from "./DatFile"
 import { DatReader } from "./DatReader"
-import SeekableFileReader from "./seekable_file_reader"
+import SeekableFileReader from "../seekable_file_reader"
 
 const DAT_DIRECTORY_HEADER_OBJECT_SIZE = 0x6B4; // 4 * 62 + 4 + 24 * 61 == 1716
 

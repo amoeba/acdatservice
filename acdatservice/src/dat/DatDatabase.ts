@@ -1,6 +1,6 @@
 import { DatDatabaseHeader } from "./DatDatabaseHeader";
 import { DatDirectory } from "./DatDirectory";
-import SeekableFileReader from "./seekable_file_reader";
+import SeekableFileReader from "../seekable_file_reader";
 
 export class DatDatabase {
   reader: SeekableFileReader

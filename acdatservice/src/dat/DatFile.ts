@@ -1,4 +1,4 @@
-import BinaryReader from "./binary_reader"
+import BinaryReader from "../binary_reader"
 import { DatFileType } from "./DatFileType"
 
 export class DatFile {
@@ -10,7 +10,6 @@ export class DatFile {
   Iteration: number | undefined
 
   unpack(reader: BinaryReader) {
-    console.log("DatFile.unpack")
     this.BitFlags = reader.ReadUint32();
     this.ObjectId = reader.ReadUint32();
     this.FileOffset = reader.ReadUint32();

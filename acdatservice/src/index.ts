@@ -1,6 +1,6 @@
 const fs = require('fs');
 
-import { DatDatabase } from "./DatDatabase";
+import { DatDatabase } from "./dat/DatDatabase";
 
 const main = function () {
   const portal_path = "/Users/bryce/src/ACEmulator/ACE/Dats/client_portal.dat";

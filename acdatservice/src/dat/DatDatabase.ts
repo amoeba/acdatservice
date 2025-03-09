@@ -21,6 +21,8 @@ export class DatDatabase {
   }
 
   read() {
+    this.read_header();
+
     // TODO: Clean this up with better type checking
     if (!this.header || !this.header.BTree || !this.header.BlockSize) {
       console.log("[WARN] Header is null, not finding");

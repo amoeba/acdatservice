@@ -2,6 +2,7 @@ import { DatDirectoryHeader } from "./DatDirectoryHeader"
 import { DatFile } from "./DatFile"
 import { DatReader } from "./DatReader"
 import SeekableFileReader from "../seekable_file_reader"
+import BinaryReader from "../binary_reader";
 
 const DAT_DIRECTORY_HEADER_OBJECT_SIZE = 0x6B4; // 4 * 62 + 4 + 24 * 61 == 1716
 
@@ -31,32 +32,36 @@ export class DatDirectory {
   read() {
     // Take care of header
     let reader = new DatReader(this.reader).read(this.RootSectorOffset, DAT_DIRECTORY_HEADER_OBJECT_SIZE, this.BlockSize);
-    this.header = new DatDirectoryHeader(reader);
-    this.header.unpack();
+    this.header = new DatDirectoryHeader();
+    let rdr = new BinaryReader(reader.buffer);
+    this.header.unpack(rdr);
 
-    this.entries.push(...this.header.entries);
+    console.log({ entries: this.header.entries?.length, branches: this.header.branches })
+    return;
 
-    if (!this.header) {
-      return [];
-    }
+    // this.entries.push(...this.header.entries);
 
-    // Stop reading if this is a leaf directory
-    if (this.isLeaf()) {
-      return [];
-    }
+    // if (!this.header) {
+    //   return [];
+    // }
 
-    if (!this.header || !this.header.entryCount || !this.header.branches) {
-      console.log("[WARN] early return, this shouldn't happen");
+    // // Stop reading if this is a leaf directory
+    // if (this.isLeaf()) {
+    //   return [];
+    // }
 
-      return [];
-    }
+    // if (!this.header || !this.header.entryCount || !this.header.branches) {
+    //   console.log("[WARN] early return, this shouldn't happen");
 
-    for (let i = 0; i < this.header.entryCount + 1; i++) {
-      let dir = new DatDirectory(this.reader, this.header.branches[i], this.BlockSize)
-      dir.read();
+    //   return [];
+    // }
 
-      this.directories.push(dir);
-    }
+    // for (let i = 0; i < this.header.entryCount + 1; i++) {
+    //   let dir = new DatDirectory(this.reader, this.header.branches[i], this.BlockSize)
+    //   dir.read();
+
+    //   this.directories.push(dir);
+    // }
   }
 
   // TODO: This is super gross right now
@@ -68,13 +73,11 @@ export class DatDirectory {
     return !this.header.branches || this.header.branches[0] == 0
   }
 
-  iter() {
-    let queue = []
+  iter(): DatFile[] {
     let files = [];
+    let queue = []
 
-    // Populate initial set
     queue.push(...this.directories);
-    files.push(...this.entries);
 
     while (queue.length > 0) {
       let d = queue.pop();

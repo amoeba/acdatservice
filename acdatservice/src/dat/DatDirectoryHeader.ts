@@ -2,31 +2,28 @@ import BinaryReader from "../binary_reader"
 import { DatFile } from "./DatFile"
 
 export class DatDirectoryHeader {
-  buffer: Uint8Array
-  reader: BinaryReader
+  reader: BinaryReader | undefined
 
   branches: Uint32Array
   entryCount: number | undefined
-  entries: DatFile[]
+  entries: DatFile[] | undefined
 
-  constructor(buffer: Uint8Array) {
-    this.buffer = buffer;
-    this.reader = new BinaryReader(buffer.buffer);
-
+  constructor() {
     this.branches = new Uint32Array(62);
-    this.entries = [];
   }
 
-  unpack() {
+  unpack(reader: BinaryReader) {
     for (let i = 0; i < this.branches.length; i++) {
-      this.branches[i] = this.reader.ReadUint32();
+      this.branches[i] = reader.ReadUint32();
     }
 
-    this.entryCount = this.reader.ReadUint32();
+    this.entryCount = reader.ReadUint32();
+
+    this.entries = [];
 
     for (let i = 0; i < this.entryCount; i++) {
       this.entries[i] = new DatFile();
-      this.entries[i].unpack(this.reader);
+      this.entries[i].unpack(reader);
     }
   }
 }

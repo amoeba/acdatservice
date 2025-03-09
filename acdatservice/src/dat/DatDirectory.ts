@@ -34,6 +34,8 @@ export class DatDirectory {
     this.header = new DatDirectoryHeader(reader);
     this.header.unpack();
 
+    this.entries.push(...this.header.entries);
+
     if (!this.header) {
       return [];
     }

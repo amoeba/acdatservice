@@ -1,0 +1,14 @@
+name = "rsw"
+main = "build/worker/shim.mjs"
+compatibility_date = "2025-03-09"
+
+[build]
+command = "cargo install -q worker-build && worker-build --release"
+
+[[r2_buckets]]
+binding = 'DATS_BUCKET'
+bucket_name = 'treestats-acdats'
+
+[observability]
+enabled = true
+head_sampling_rate = 1 # optional. default = 1.

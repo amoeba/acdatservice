@@ -1,10 +1,6 @@
 const fs = require('fs');
 
-import BinaryReader from "./binary_reader";
-import { DatDatabase } from "./lib";
-import { PortalIcon } from "./portal_icon";
-import SeekableFileReader from "./seekable_file_reader";
-import sharp from "sharp";
+import { DatDatabase } from "./DatDatabase";
 
 const main = function () {
   const portal_path = "/Users/bryce/src/ACEmulator/ACE/Dats/client_portal.dat";
@@ -28,29 +24,29 @@ const main = function () {
   file.read();
 
   let files = file.rootDir?.iter();
+  console.log({ l: files?.length });
+  // if (files) {
+  //   for (let i = 0; i < files.length; i++) {
+  //     let file = files[i];
 
-  if (files) {
-    for (let i = 0; i < files.length; i++) {
-      let file = files[i];
+  //     if (file.ObjectId && (file.ObjectId & 0x7F000000) == 0x6000000 && file.FileSize == 4120) {
+  //       console.log("yes", { file: file });
 
-      if (file.ObjectId && (file.ObjectId & 0x7F000000) == 0x6000000 && file.FileSize == 4120) {
-        console.log("yes", { file: file });
+  //       let file_reader = new SeekableFileReader(portal_path, file.FileOffset);
+  //       let icon = new PortalIcon();
+  //       icon.unpack(file_reader);
 
-        let file_reader = new SeekableFileReader(portal_path, file.FileOffset);
-        let icon = new PortalIcon();
-        icon.unpack(file_reader);
-
-        // WIP: Export
-        sharp(icon.buffer, {
-          raw: {
-            width: icon.width || 0,
-            height: icon.height || 0,
-            channels: 4
-          }
-        }).png().toFile("latest.png");
-      }
-    }
-  }
+  //       // WIP: Export
+  //       sharp(icon.buffer, {
+  //         raw: {
+  //           width: icon.width || 0,
+  //           height: icon.height || 0,
+  //           channels: 4
+  //         }
+  //       }).png().toFile("latest.png");
+  //     }
+  //   }
+  // }
 
   file.close();
 }

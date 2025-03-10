@@ -13,7 +13,7 @@ pub async fn index_get(_ctx: RouteContext<()>) -> Result<Response> {
         PathItem {
             get: Some(Operation {
                 summary: "Get an icon".to_string(),
-                description: "Returns a list of users with optional filtering".to_string(),
+                description: "Returns a PNG icon with optional scaling applied. Example https://dats.treestats.net/icons/26967?scale=2.".to_string(),
                 operation_id: "icons_get".to_string(),
                 parameters: vec![Parameter {
                     name: "scale".to_string(),

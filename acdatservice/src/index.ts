@@ -54,6 +54,23 @@ const main = function () {
   db.read();
   let files: DatFile[] = [];
   db.rootDir?.files(files);
+
+  for (let i = 0; i < files.length; i++) {
+    let file = files[i];
+
+    if (file.type() != DatFileType.Texture && file.FileSize != 4120) {
+      continue;
+    }
+
+    if (!file.ObjectId) {
+      break;
+    }
+
+    let id = file.ObjectId;
+    let id_short = file.ObjectId - 0x6000000;
+
+    console.log(`insert into files (id, id_short, offset, size, dat_type) values (${id}, ${id_short}, ${file.FileOffset}, 4120, 0);`);
+  }
   db.close();
 }
 

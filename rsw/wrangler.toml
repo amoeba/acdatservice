@@ -9,6 +9,10 @@ command = "cargo install -q worker-build && worker-build --release"
 binding = 'DATS_BUCKET'
 bucket_name = 'treestats-acdats'
 
+[[d1_databases]]
+binding = "DATS_DB"
+database_name = "dats"
+database_id = "21ee3b5f-a28f-43e3-9def-b29f74c6c7ac"
+
 [observability]
 enabled = true
-head_sampling_rate = 1 # optional. default = 1.

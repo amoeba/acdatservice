@@ -71,7 +71,7 @@ async fn index_get(ctx: RouteContext<()>) -> Result<Response> {
 }
 
 async fn icons_index(ctx: RouteContext<()>) -> Result<Response> {
-    Response::ok("TODO: icons_index")
+    Response::ok("See / for OpenAPI spec.")
 }
 
 async fn generate_dat_image(object: Object, scale: u32) -> Result<Response> {

@@ -1102,6 +1102,7 @@ dependencies = [
  "console_error_panic_hook",
  "image",
  "serde",
+ "serde_json",
  "worker",
 ]
 

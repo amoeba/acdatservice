@@ -1,11 +1,73 @@
+use openapi::{
+    Contact, Info, MediaType, OpenApiDocument, Operation, Parameter, PathItem, Schema, Server,
+};
 use serde::Deserialize;
-use std::io::Cursor;
+use std::{collections::HashMap, io::Cursor};
 
 use image::{DynamicImage, ImageBuffer, RgbaImage};
 use worker::*;
 
+mod openapi;
+
 async fn index_get(ctx: RouteContext<()>) -> Result<Response> {
-    Response::ok("TODO:index")
+    let mut paths = HashMap::new();
+    paths.insert(
+        "/icons/:short_id".to_string(),
+        PathItem {
+            get: Some(Operation {
+                summary: "Get an icon".to_string(),
+                description: "Returns a list of users with optional filtering".to_string(),
+                operation_id: "icons_get".to_string(),
+                parameters: vec![Parameter {
+                    name: "scale".to_string(),
+                    location: "query".to_string(),
+                    description: "Optional integer value to scale the image by".to_string(),
+                    required: false,
+                    schema: Schema::ObjectSchema {
+                        schema_type: "integer".to_string(),
+                        default: Some(serde_json::json!(1)),
+                        minimum: Some(1),
+                        maximum: Some(8),
+                        format: None,
+                        min_length: None,
+                        max_length: None,
+                        read_only: None,
+                        description: None,
+                        properties: None,
+                        required: vec![],
+                    },
+                }],
+            }),
+        },
+    );
+
+    let openapi_doc = OpenApiDocument {
+        openapi: "3.1.1".to_string(),
+        info: Info {
+            title: "ACDatService API".to_string(),
+            description: "API for the ACDatService".to_string(),
+            version: "0.1.0".to_string(),
+            contact: Contact {
+                name: "Contact Info".to_string(),
+                email: "petridish@gmail.com".to_string(),
+                url: "https://github.com/amoeba/acdatservice".to_string(),
+            },
+        },
+        servers: vec![Server {
+            url: "https://dats.treestats.net/".to_string(),
+            description: "Main ACDatService Server".to_string(),
+        }],
+        paths,
+    };
+
+    let json = serde_json::to_string_pretty(&openapi_doc)?;
+
+    let mut response = Response::from_body(worker::ResponseBody::Body(json.into()))?;
+    response
+        .headers_mut()
+        .set("Content-Type", "application/json")?;
+
+    Ok(response)
 }
 
 async fn icons_index(ctx: RouteContext<()>) -> Result<Response> {

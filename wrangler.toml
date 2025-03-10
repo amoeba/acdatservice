@@ -1,4 +1,4 @@
-name = "rsw"
+name = "acdatservice"
 main = "build/worker/shim.mjs"
 compatibility_date = "2025-03-09"
 

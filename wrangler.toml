@@ -1,9 +1,11 @@
 name = "acdatservice"
 main = "build/worker/shim.mjs"
 compatibility_date = "2025-03-09"
+routes = [{ pattern = "dats.treestats.net", custom_domain = true }]
 
 [build]
 command = "cargo install -q worker-build && worker-build --release"
+
 
 [[r2_buckets]]
 binding = 'DATS_BUCKET'

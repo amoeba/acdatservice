@@ -7,6 +7,7 @@ Built with Cloudflare Workers, R2, and D1.
 
 - Icons
   - Get icon as PNG, scale from 1x-8x
+  - Example: <https://dats.treestats.net/icons/26967?scale=2>
 
 ## Development
 

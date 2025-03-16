@@ -1,9 +1,10 @@
-use std::collections::HashMap;
+use std::{collections::HashMap, io::Cursor};
+use libac_rs::{dat::file_types::texture::Texture, icon::Icon};
 use worker::*;
+use deku::DekuContainerRead;
 
 use crate::{
-    generators::icon::generate_dat_image,
-    openapi::{Contact, Info, OpenApiDocument, Operation, Parameter, PathItem, Schema, Server},
+    db, generators::icon::generate_icon, openapi::{Contact, Info, OpenApiDocument, Operation, Parameter, PathItem, Schema, Server}
 };
 
 pub async fn index_get(_ctx: RouteContext<()>) -> Result<Response> {
@@ -71,7 +72,35 @@ pub async fn icons_index(ctx: RouteContext<()>) -> Result<Response> {
     let _ = ctx;
     Response::ok("See / for OpenAPI spec.")
 }
-pub async fn icons_get(url: Url, ctx: RouteContext<()>) -> Result<Response> {
+
+pub async fn get_buf_for_file(ctx: &RouteContext<()>, file: &db::File)-> std::result::Result<Vec<u8>, worker::Error> {
+    let bucket = ctx.bucket("DATS_BUCKET")?;
+    let builder = bucket.get("client_portal.dat");
+    let data = builder
+        .range(Range::OffsetWithLength {
+            offset: file.offset + 8, // 8 is the first two DWORDS before the texture
+            length: file.size as u64,
+        })
+        .execute()
+        .await?;
+
+    match data {
+        Some(obj) => {
+            Ok(obj.body().unwrap().bytes().await?)
+        }
+        None => todo!(),
+    }
+}
+
+pub async fn get_file(ctx: &RouteContext<()>, file_id: u32) -> Result<Option<db::File>> {
+    let db = ctx.d1("DATS_DB")?;
+    let statement = db.prepare("SELECT * FROM files WHERE id_short = ?1 LIMIT 1");
+    let query = statement.bind(&[file_id.into()])?;
+
+    Ok(query.first::<crate::db::File>(None).await?)
+}
+
+pub async fn icons_get(url: Url, ctx: RouteContext<()>) -> Result<Response>{
     let query_params = url.query_pairs();
 
     // Scale
@@ -98,38 +127,43 @@ pub async fn icons_get(url: Url, ctx: RouteContext<()>) -> Result<Response> {
         None => return Response::error("Must specify icon ID.", 400),
     };
 
-    // Look up Icon by ID against D1 Database
-    let db = ctx.d1("DATS_DB")?;
-    let statement = db.prepare("SELECT * FROM files WHERE id_short = ?1 LIMIT 1");
-    let query = statement.bind(&[param_id.into()])?;
-    let result = query.first::<crate::db::File>(None).await?;
-
-    let file = match result {
-        Some(val) => val,
-        None => {
-            return Response::error(
-                format!("Failed to find index entry for `{}`", param_id),
-                404,
-            )
-        }
+    let param_id_num = match param_id.parse::<u32>() {
+        Ok(val) => val,
+        Err(_) => return Response::error("Failed to parse icon as ObjectID", 400),
     };
 
-    // Execute the object get operation with out byte range
-    // TODO: Implement a binary reader for Textures
-    let bucket = ctx.bucket("DATS_BUCKET")?;
-    let object = bucket.get("client_portal.dat");
-    let data = object
-        .range(Range::OffsetWithLength {
-            offset: file.offset + 28,
-            length: 4096,
-        })
-        .execute()
-        .await;
+    // Look up Icon by ID against D1 Database
+    println!("param id is {}", param_id);
+    let base_file = match get_file(&ctx, param_id_num).await? {
+        Some(val) => val,
+        None=> return Response::error("Failed to get file", 400)
+    };
+
+    // Create icon
+    let base_object = get_buf_for_file(&ctx, &base_file).await?;
+
+    // Debugging
+    // let mut response = Response::from_body(worker::ResponseBody::Body(base_object))?;
+    // response.headers_mut().set("Content-Type", "application/octet-stream")?;
+    // Ok(response)
+
+    let mut reader = Cursor::new(base_object);
+    let base_texture = match Texture::from_reader((&mut reader, 0)) {
+        Ok(val) => val,
+        Err(e) => return Response::error(format!("Failed to instantiate : {}", e), 400),
+    };
+
+    let icon: Icon = Icon {
+        width: 32,
+        height: 32,
+        scale: 1,
+        base: base_texture.1,
+        underlay: None,
+        overlay: None,
+        overlay2: None,
+        effect: None,
+    };
 
     // Generate the image or error
-    match data {
-        Ok(Some(object)) => generate_dat_image(object, param_scale).await,
-        Ok(None) => return Response::error("Failed to get byte range.", 500),
-        Err(err) => return Response::error(format!("Error while getting byte range: {err}"), 500),
-    }
+    generate_icon(&icon).await
 }

@@ -132,8 +132,42 @@ pub async fn icons_get(url: Url, ctx: RouteContext<()>) -> Result<Response>{
         Err(_) => return Response::error("Failed to parse icon as ObjectID", 400),
     };
 
+    // Underlay
+    let param_underlay = match query_params
+        .clone()
+        .find(|(key, _)| key == "underlay") {
+            Some((_, value)) => {
+                match value.parse::<u32>() {
+                    Ok(value) => Ok(Some(value)),
+                    Err(_) => Err("Failed to parse underlay parameter as u32".to_string())
+                }
+            },
+            None => Ok(None)
+    }?;
+
+    let maybe_underlay = match param_underlay {
+        Some(val) => {
+            let underlay_file = match get_file(&ctx, val).await? {
+                Some(val) => val,
+                None=> return Response::error("Failed to get file", 400)
+            };
+
+            // Create icon
+            let underlay_object = get_buf_for_file(&ctx, &underlay_file).await?;
+
+            let mut reader = Cursor::new(underlay_object);
+            let underlay_texture = match Texture::from_reader((&mut reader, 0)) {
+                Ok(val) => val,
+                Err(e) => return Response::error(format!("Failed to instantiate : {}", e), 400),
+            };
+
+            Some(underlay_texture.1)
+
+        },
+        None => None,
+    };
+
     // Look up Icon by ID against D1 Database
-    println!("param id is {}", param_id);
     let base_file = match get_file(&ctx, param_id_num).await? {
         Some(val) => val,
         None=> return Response::error("Failed to get file", 400)
@@ -158,7 +192,7 @@ pub async fn icons_get(url: Url, ctx: RouteContext<()>) -> Result<Response>{
         height: 32,
         scale: 1,
         base: base_texture.1,
-        underlay: None,
+        underlay: maybe_underlay,
         overlay: None,
         overlay2: None,
         effect: None,

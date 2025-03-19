@@ -287,7 +287,12 @@ pub async fn icons_get(url: Url, ctx: RouteContext<()>) -> Result<Response> {
         Some(val) => {
             let underlay_file = match get_file(&ctx, val).await? {
                 Some(val) => val,
-                None => return Response::error("Failed to get file", 400),
+                None => {
+                    return Response::error(
+                        format!("Failed to get DAT file for file with ID {:?}", param_id_num),
+                        400,
+                    )
+                }
             };
 
             // Create icon
@@ -308,7 +313,12 @@ pub async fn icons_get(url: Url, ctx: RouteContext<()>) -> Result<Response> {
         Some(val) => {
             let overlay_file = match get_file(&ctx, val).await? {
                 Some(val) => val,
-                None => return Response::error("Failed to get file", 400),
+                None => {
+                    return Response::error(
+                        format!("Failed to get DAT file for file with ID {:?}", param_id_num),
+                        400,
+                    )
+                }
             };
 
             let overlay_object = get_buf_for_file(&ctx, &overlay_file).await?;
@@ -328,7 +338,12 @@ pub async fn icons_get(url: Url, ctx: RouteContext<()>) -> Result<Response> {
         Some(val) => {
             let overlay2_file = match get_file(&ctx, val).await? {
                 Some(val) => val,
-                None => return Response::error("Failed to get file", 400),
+                None => {
+                    return Response::error(
+                        format!("Failed to get DAT file for file with ID {:?}", param_id_num),
+                        400,
+                    )
+                }
             };
 
             let overlay2_object = get_buf_for_file(&ctx, &overlay2_file).await?;
@@ -348,7 +363,12 @@ pub async fn icons_get(url: Url, ctx: RouteContext<()>) -> Result<Response> {
         Some(val) => {
             let effect_file = match get_file(&ctx, val).await? {
                 Some(val) => val,
-                None => return Response::error("Failed to get file", 400),
+                None => {
+                    return Response::error(
+                        format!("Failed to get DAT file for file with ID {:?}", param_id_num),
+                        400,
+                    )
+                }
             };
 
             let effect_object = get_buf_for_file(&ctx, &effect_file).await?;
@@ -367,7 +387,12 @@ pub async fn icons_get(url: Url, ctx: RouteContext<()>) -> Result<Response> {
     // Look up Icon by ID against D1 Database
     let base_file = match get_file(&ctx, param_id_num).await? {
         Some(val) => val,
-        None => return Response::error("Failed to get file", 400),
+        None => {
+            return Response::error(
+                format!("Failed to get DAT file for file with ID {:?}", param_id_num),
+                400,
+            )
+        }
     };
 
     // Create icon

@@ -180,7 +180,7 @@ pub async fn icons_get(url: Url, ctx: RouteContext<()>) -> Result<Response> {
     // Ok(response)
 
     let mut reader = Cursor::new(base_object);
-    let base_texture = match Texture::from_reader((&mut reader, 0)) {
+    let base_texture = match Texture::read(&mut reader) {
         Ok(val) => val,
         Err(e) => return Response::error(format!("Failed to instantiate : {}", e), 400),
     };

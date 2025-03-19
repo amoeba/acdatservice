@@ -189,7 +189,7 @@ pub async fn icons_get(url: Url, ctx: RouteContext<()>) -> Result<Response> {
         width: 32,
         height: 32,
         scale: param_scale,
-        base: base_texture.1,
+        base: base_texture,
         underlay: maybe_underlay,
         overlay: None,
         overlay2: None,

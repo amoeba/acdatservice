@@ -190,7 +190,7 @@ pub async fn icons_get(url: Url, ctx: RouteContext<()>) -> Result<Response>{
     let icon: Icon = Icon {
         width: 32,
         height: 32,
-        scale: 1,
+        scale: param_scale,
         base: base_texture.1,
         underlay: maybe_underlay,
         overlay: None,

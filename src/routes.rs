@@ -1,12 +1,23 @@
 use libac_rs::{dat::file_types::texture::Texture, icon::Icon};
-use std::{collections::HashMap, io::Cursor};
+use std::{collections::HashMap, fmt::Debug, io::Cursor};
 use worker::*;
 
 use crate::{
-    db,
     generators::icon::generate_icon,
+    get_buf_for_file, get_file,
     openapi::{Contact, Info, OpenApiDocument, Operation, Parameter, PathItem, Schema, Server},
+    parse_decimal_or_hex_string,
 };
+
+#[derive(Debug)]
+struct DebugResponse {
+    icon_id: i32,
+    scale: u32,
+    underlay: Option<i32>,
+    overlay: Option<i32>,
+    overlay2: Option<i32>,
+    ui_effect: Option<i32>,
+}
 
 pub async fn index_get(_ctx: RouteContext<()>) -> Result<Response> {
     let mut paths = HashMap::new();
@@ -169,58 +180,32 @@ pub async fn icons_index(ctx: RouteContext<()>) -> Result<Response> {
     Response::ok("See / for OpenAPI spec.")
 }
 
-pub async fn get_buf_for_file(
-    ctx: &RouteContext<()>,
-    file: &db::File,
-) -> std::result::Result<Vec<u8>, worker::Error> {
-    let bucket = ctx.bucket("DATS_BUCKET")?;
-    let builder = bucket.get("client_portal.dat");
-    let data = builder
-        .range(Range::OffsetWithLength {
-            offset: file.offset + 8, // 8 is the first two DWORDS before the texture
-            length: file.size as u64,
-        })
-        .execute()
-        .await?;
-
-    match data {
-        Some(obj) => Ok(obj.body().unwrap().bytes().await?),
-        None => todo!(),
-    }
-}
-
-pub async fn get_file(ctx: &RouteContext<()>, file_id: u32) -> Result<Option<db::File>> {
-    let db = ctx.d1("DATS_DB")?;
-    let statement = db.prepare("SELECT * FROM files WHERE id_short = ?1 LIMIT 1");
-    let query = statement.bind(&[file_id.into()])?;
-
-    Ok(query.first::<crate::db::File>(None).await?)
-}
-
 pub async fn icons_get(url: Url, ctx: RouteContext<()>) -> Result<Response> {
-    let query_params = url.query_pairs();
+    let query_params: HashMap<_, _> = url.query_pairs().into_owned().collect();
 
-    // Icon ID
+    // :icon_id
     let param_id = match ctx.param("id") {
         Some(val) => val,
         None => return Response::error("Must specify icon ID.", 400),
     };
 
-    let param_id_num = match param_id.parse::<u32>() {
+    let param_id_num = match parse_decimal_or_hex_string(param_id) {
         Ok(val) => val,
-        Err(_) => return Response::error("Failed to parse icon as ObjectID", 400),
+        Err(err) => return Response::error(err.to_string(), 400),
     };
 
     // scale
     let param_scale = match query_params
-        .clone()
-        .find(|(key, _)| key == "scale")
-        .map(|(_, value)| value.parse::<u32>())
+        .get("scale")
+        .map(|value| value.parse::<u32>())
         .unwrap_or_else(|| Ok(1))
     {
         Ok(val) => val,
         Err(err) => {
-            return Response::error(format!("Bad request: {}", err), 400);
+            return Response::error(
+                format!("Failed to parse query parameter: scale.{}", err),
+                400,
+            );
         }
     };
 
@@ -230,40 +215,72 @@ pub async fn icons_get(url: Url, ctx: RouteContext<()>) -> Result<Response> {
     }
 
     // underlay
-    let param_underlay = match query_params.clone().find(|(key, _)| key == "underlay") {
-        Some((_, value)) => match value.parse::<u32>() {
-            Ok(value) => Ok(Some(value)),
-            Err(_) => Err("Failed to parse underlay parameter as u32".to_string()),
+    let param_underlay = match query_params.get("underlay") {
+        Some(value) => match parse_decimal_or_hex_string(value) {
+            Ok(value) => Some(value),
+            Err(err) => {
+                return Response::error(
+                    format!(
+                        "Failed to parse query parameter: underlay. Error: {}",
+                        err.to_string()
+                    ),
+                    400,
+                )
+            }
         },
-        None => Ok(None),
-    }?;
+        None => None,
+    };
 
     // overlay
-    let param_overlay = match query_params.clone().find(|(key, _)| key == "overlay") {
-        Some((_, value)) => match value.parse::<u32>() {
-            Ok(value) => Ok(Some(value)),
-            Err(_) => Err("Failed to parse overlay parameter as u32".to_string()),
+    let param_overlay = match query_params.get("overlay") {
+        Some(value) => match parse_decimal_or_hex_string(value) {
+            Ok(value) => Some(value),
+            Err(err) => {
+                return Response::error(
+                    format!(
+                        "Failed to parse query parameter: overlay. Error: {}",
+                        err.to_string()
+                    ),
+                    400,
+                )
+            }
         },
-        None => Ok(None),
-    }?;
+        None => None,
+    };
 
     // overlay2
-    let param_overlay2 = match query_params.clone().find(|(key, _)| key == "overlay2") {
-        Some((_, value)) => match value.parse::<u32>() {
-            Ok(value) => Ok(Some(value)),
-            Err(_) => Err("Failed to parse overlay2 parameter as u32".to_string()),
+    let param_overlay2 = match query_params.get("overlay2") {
+        Some(value) => match parse_decimal_or_hex_string(value) {
+            Ok(value) => Some(value),
+            Err(err) => {
+                return Response::error(
+                    format!(
+                        "Failed to parse query parameter: overlay2. Error: {}",
+                        err.to_string()
+                    ),
+                    400,
+                )
+            }
         },
-        None => Ok(None),
-    }?;
+        None => None,
+    };
 
     // ui_effect
-    let param_ui_effect = match query_params.clone().find(|(key, _)| key == "ui_effect") {
-        Some((_, value)) => match value.parse::<u32>() {
-            Ok(value) => Ok(Some(value)),
-            Err(_) => Err("Failed to parse ui_effect parameter as u32".to_string()),
+    let param_ui_effect = match query_params.get("ui_effect") {
+        Some(value) => match parse_decimal_or_hex_string(value) {
+            Ok(value) => Some(value),
+            Err(err) => {
+                return Response::error(
+                    format!(
+                        "Failed to parse query parameter: ui_effect. Error: {}",
+                        err.to_string()
+                    ),
+                    400,
+                )
+            }
         },
-        None => Ok(None),
-    }?;
+        None => None,
+    };
 
     // Get textures for any files we need
     let maybe_underlay = match param_underlay {
@@ -355,11 +372,6 @@ pub async fn icons_get(url: Url, ctx: RouteContext<()>) -> Result<Response> {
 
     // Create icon
     let base_object = get_buf_for_file(&ctx, &base_file).await?;
-
-    // Debugging
-    // let mut response = Response::from_body(worker::ResponseBody::Body(base_object))?;
-    // response.headers_mut().set("Content-Type", "application/octet-stream")?;
-    // Ok(response)
 
     let mut reader = Cursor::new(base_object);
     let base_texture = match Texture::read(&mut reader) {

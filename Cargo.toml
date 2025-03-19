@@ -15,8 +15,9 @@ wasm-opt = false
 crate-type = ["cdylib"]
 
 [dependencies]
+byteorder = "1.5.0"
+byteutils = "0.1.0"
 console_error_panic_hook = { version = "0.1.1" }
-deku = "0.18.1"
 image = "0.25.5"
 libac-rs = { version = "0.1.0", path = "../libac-rs" }
 serde = "1.0.219"

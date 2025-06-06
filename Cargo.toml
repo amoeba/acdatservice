@@ -14,6 +14,9 @@ wasm-opt = false
 [[bin]]
 name = "create_index"
 
+[[bin]]
+name = "dropshot_server"
+
 [lib]
 crate-type = ["cdylib"]
 

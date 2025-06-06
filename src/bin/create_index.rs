@@ -6,6 +6,7 @@ fn setup() -> Result<(), Box<dyn std::error::Error>> {
 
     Ok(())
 }
+
 fn migrate(connection: &Connection) -> Result<(), Box<dyn std::error::Error>> {
     connection.execute("DROP TABLE IF EXISTS files;")?;
     connection.execute(
@@ -19,6 +20,7 @@ fn migrate(connection: &Connection) -> Result<(), Box<dyn std::error::Error>> {
 
     Ok(())
 }
+
 fn insert_test_data(connection: &Connection) -> Result<(), Box<dyn std::error::Error>> {
     let test_data = [
         (0, "texture", "icon", 0),

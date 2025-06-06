@@ -11,6 +11,9 @@ release = false
 [package.metadata.wasm-pack.profile.release]
 wasm-opt = false
 
+[[bin]]
+name = "create_index"
+
 [lib]
 crate-type = ["cdylib"]
 
@@ -26,3 +29,4 @@ serde = { version = "1.0.219", features = ["derive"] }
 serde_json = "1.0.140"
 tokio = { version = "1.45.1", features = ["full"] }
 worker = { version = "0.5.0", features = ["http", "d1"] }
+sqlite = "0.36.1"

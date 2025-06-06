@@ -1,7 +1,7 @@
 use std::net::{Ipv4Addr, SocketAddr};
 
 use dropshot::{
-    endpoint, ApiDescription, ConfigDropshot, ConfigLogging, ConfigLoggingLevel, HttpError,
+    endpoint, ApiDescription, ConfigDropshot, ConfigLogging, ConfigLoggingLevel, Header, HttpError,
     HttpResponseOk, Path, RequestContext, ServerBuilder,
 };
 use schemars::JsonSchema;
@@ -112,6 +112,68 @@ async fn myapi_files_index(
     }
 }
 
+#[derive(Serialize, JsonSchema)]
+struct RangeResult {
+    start: u64,
+    end: u64,
+}
+
+fn parse_range_header(header: &str) -> Option<(u64, u64)> {
+    let parts: Vec<&str> = header.split('=').collect();
+
+    if parts.len() != 2 || parts[0] != "bytes" {
+        return None;
+    }
+
+    let range_parts: Vec<&str> = parts[1].split('-').collect();
+
+    if range_parts.len() != 2 {
+        return None;
+    }
+
+    let start = range_parts[0].parse::<u64>().ok()?;
+    let end = range_parts[1].parse::<u64>().ok()?;
+
+    Some((start, end))
+}
+
+#[endpoint(
+    method = GET,
+    path = "/ranges",
+)]
+async fn myapi_test_byte_ranges(
+    rqctx: RequestContext<()>,
+) -> Result<HttpResponseOk<RangeResult>, HttpError> {
+    let header = rqctx.request.headers().get("range");
+
+    match header {
+        Some(value) => {
+            let range = parse_range_header(value.to_str().unwrap_or(""));
+
+            if range.is_none() {
+                return Err(HttpError::for_bad_request(
+                    Some("400".to_string()),
+                    "Invalid range header format.".to_string(),
+                ));
+            }
+            let final_range = range.unwrap();
+
+            let response = RangeResult {
+                start: final_range.0,
+                end: final_range.1,
+            };
+
+            Ok(HttpResponseOk(response))
+        }
+        None => {
+            return Err(HttpError::for_bad_request(
+                Some("400".to_string()),
+                "Range header not passed.".to_string(),
+            ))
+        }
+    }
+}
+
 #[tokio::main]
 async fn main() -> Result<(), String> {
     let log = ConfigLogging::StderrTerminal {
@@ -130,6 +192,7 @@ async fn main() -> Result<(), String> {
     api.register(myapi_dats_get).unwrap();
     api.register(myapi_dats_get_dat_file).unwrap();
     api.register(myapi_files_index).unwrap();
+    api.register(myapi_test_byte_ranges).unwrap();
 
     let server = ServerBuilder::new(api, (), log)
         .config(config_dropshot)

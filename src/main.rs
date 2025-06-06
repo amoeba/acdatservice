@@ -1,33 +1,78 @@
-use std::{
-    fs::File,
-    io::{Cursor, Read, Seek, SeekFrom},
+use std::net::{Ipv4Addr, SocketAddr};
+
+use dropshot::{
+    endpoint, ApiDescription, ConfigDropshot, ConfigLogging, ConfigLoggingLevel, HttpError,
+    HttpResponseOk, Path, RequestContext, ServerBuilder,
 };
+use schemars::JsonSchema;
+use serde::{Deserialize, Serialize};
 
-use image::{DynamicImage, ImageBuffer, RgbaImage};
+#[derive(Serialize, JsonSchema)]
+struct ListOfDatFile {
+    dat_files: Vec<DatFile>,
+}
 
-fn main() -> Result<(), Box<dyn std::error::Error>> {
-    println!("Hello, world!");
+#[derive(Serialize, JsonSchema)]
+struct DatFile {
+    name: String,
+}
 
-    // offset: 632715264 + 28,
-    // length: 4090,
-    let start = 632715264 + 28;
-    let len = 4096;
+#[derive(Deserialize, JsonSchema)]
+struct GetDatFileParams {
+    name: String,
+}
 
-    let mut input = File::open("../client_portal.dat")?;
+#[endpoint(
+    method = GET,
+    path = "/dats",
+)]
+async fn myapi_dats_get(
+    _rqctx: RequestContext<()>,
+) -> Result<HttpResponseOk<ListOfDatFile>, HttpError> {
+    let dat_files: Vec<DatFile> = vec![DatFile {
+        name: String::from("example.dat"),
+    }];
+    Ok(HttpResponseOk(ListOfDatFile { dat_files }))
+}
 
-    input.seek(SeekFrom::Start(start))?;
-    let mut buf = vec![0; len];
-    input.read_exact(&mut buf)?;
+#[endpoint(
+    method = GET,
+    path = "/dats/{name}",
+)]
+async fn myapi_dats_get_dat_file(
+    _rqctx: RequestContext<()>,
+    path_params: Path<GetDatFileParams>,
+) -> Result<HttpResponseOk<DatFile>, HttpError> {
+    let name = path_params.into_inner().name;
 
-    println!("{:?}", buf);
+    let dat_file = DatFile {
+        name: String::from(name),
+    };
+    Ok(HttpResponseOk(dat_file))
+}
 
-    let img: RgbaImage = ImageBuffer::from_raw(32, 32, buf).expect("Failed to create ImageBuffer");
-    let dynamic_img: DynamicImage = DynamicImage::ImageRgba8(img);
-    let mut png_buffer = Vec::new();
+#[tokio::main]
+async fn main() -> Result<(), String> {
+    let log = ConfigLogging::StderrTerminal {
+        level: ConfigLoggingLevel::Info,
+    }
+    .to_logger("dropshot-server")
+    .map_err(|e| e.to_string())?;
 
-    dynamic_img.write_to(&mut Cursor::new(&mut png_buffer), image::ImageFormat::Png)?;
+    let config_dropshot = ConfigDropshot {
+        bind_address: SocketAddr::from((Ipv4Addr::LOCALHOST, 8080)),
+        ..Default::default()
+    };
 
-    dynamic_img.save_with_format("out.png", image::ImageFormat::Png)?;
+    let mut api = ApiDescription::new();
 
-    Ok(())
+    api.register(myapi_dats_get).unwrap();
+    api.register(myapi_dats_get_dat_file).unwrap();
+
+    let server = ServerBuilder::new(api, (), log)
+        .config(config_dropshot)
+        .start()
+        .map_err(|error| format!("failed to start server: {}", error))?;
+
+    server.await.map_err(|e| e.to_string())
 }

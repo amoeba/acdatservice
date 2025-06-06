@@ -18,8 +18,11 @@ crate-type = ["cdylib"]
 byteorder = "1.5.0"
 byteutils = "0.1.0"
 console_error_panic_hook = { version = "0.1.1" }
+dropshot = "0.16.2"
 image = "0.25.5"
 libac-rs = { version = "0.1.0", path = "../libac-rs" }
-serde = "1.0.219"
+schemars = { version = "0.8", features = ["derive"] }
+serde = { version = "1.0.219", features = ["derive"] }
 serde_json = "1.0.140"
+tokio = { version = "1.45.1", features = ["full"] }
 worker = { version = "0.5.0", features = ["http", "d1"] }

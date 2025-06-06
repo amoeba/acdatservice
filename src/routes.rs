@@ -1,4 +1,7 @@
-use libac_rs::{dat::file_types::texture::Texture, icon::Icon};
+use libac_rs::{
+    dat::file_types::{dat_file::DatFileRead, texture::Texture},
+    icon::Icon,
+};
 use std::{collections::HashMap, fmt::Debug, io::Cursor};
 use worker::*;
 

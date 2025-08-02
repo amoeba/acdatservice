@@ -42,15 +42,22 @@ pub async fn get_buf_for_file(
         .execute()
         .await?;
 
+    console_debug!(
+        "get_buf_for_file: file.offset = {}, file.size = {}",
+        file.offset,
+        file.size as u64
+    );
     match data {
         Some(obj) => Ok(obj.body().unwrap().bytes().await?),
-        None => todo!(),
+        None => {
+            Err(std::io::Error::new(std::io::ErrorKind::Other, "failed in get_buf_for_file to get buffer for the file. this code is not very debuggable").into())
+        }
     }
 }
 
-pub async fn get_file(ctx: &RouteContext<()>, file_id: i32) -> Result<Option<db::File>> {
+pub async fn get_file_by_id(ctx: &RouteContext<()>, file_id: i32) -> Result<Option<db::File>> {
     let db = ctx.d1("DATS_DB")?;
-    let statement = db.prepare("SELECT * FROM files WHERE id_short = ?1 LIMIT 1");
+    let statement = db.prepare("SELECT * FROM files WHERE id = ?1 LIMIT 1");
     let query = statement.bind(&[file_id.into()])?;
 
     Ok(query.first::<crate::db::File>(None).await?)

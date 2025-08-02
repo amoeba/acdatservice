@@ -7,7 +7,7 @@ use worker::*;
 
 use crate::{
     generators::icon::generate_icon,
-    get_buf_for_file, get_file,
+    get_buf_for_file, get_file_by_id,
     openapi::{Contact, Info, OpenApiDocument, Operation, Parameter, PathItem, Schema, Server},
     parse_decimal_or_hex_string,
 };
@@ -288,7 +288,7 @@ pub async fn icons_get(url: Url, ctx: RouteContext<()>) -> Result<Response> {
     // Get textures for any files we need
     let maybe_underlay = match param_underlay {
         Some(val) => {
-            let underlay_file = match get_file(&ctx, val).await? {
+            let underlay_file = match get_file_by_id(&ctx, val).await? {
                 Some(val) => val,
                 None => {
                     return Response::error(
@@ -314,7 +314,7 @@ pub async fn icons_get(url: Url, ctx: RouteContext<()>) -> Result<Response> {
 
     let maybe_overlay = match param_overlay {
         Some(val) => {
-            let overlay_file = match get_file(&ctx, val).await? {
+            let overlay_file = match get_file_by_id(&ctx, val).await? {
                 Some(val) => val,
                 None => {
                     return Response::error(
@@ -339,7 +339,7 @@ pub async fn icons_get(url: Url, ctx: RouteContext<()>) -> Result<Response> {
 
     let maybe_overlay2 = match param_overlay2 {
         Some(val) => {
-            let overlay2_file = match get_file(&ctx, val).await? {
+            let overlay2_file = match get_file_by_id(&ctx, val).await? {
                 Some(val) => val,
                 None => {
                     return Response::error(
@@ -364,7 +364,7 @@ pub async fn icons_get(url: Url, ctx: RouteContext<()>) -> Result<Response> {
 
     let maybe_ui_effect = match param_ui_effect {
         Some(val) => {
-            let effect_file = match get_file(&ctx, val).await? {
+            let effect_file = match get_file_by_id(&ctx, val).await? {
                 Some(val) => val,
                 None => {
                     return Response::error(
@@ -388,7 +388,7 @@ pub async fn icons_get(url: Url, ctx: RouteContext<()>) -> Result<Response> {
     };
 
     // Look up Icon by ID against D1 Database
-    let base_file = match get_file(&ctx, param_id_num).await? {
+    let base_file = match get_file_by_id(&ctx, param_id_num).await? {
         Some(val) => val,
         None => {
             return Response::error(

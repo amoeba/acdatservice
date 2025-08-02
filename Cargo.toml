@@ -16,20 +16,27 @@ name = "create_index"
 
 [[bin]]
 name = "dropshot_server"
+required-features = ["dropshot"]
 
 [lib]
 crate-type = ["cdylib"]
 
 [dependencies]
-byteorder = "1.5.0"
-byteutils = "0.1.0"
-console_error_panic_hook = { version = "0.1.1" }
-dropshot = "0.16.2"
-image = "0.25.5"
-libac-rs = { version = "0.1.0", path = "../libac-rs" }
+libac-rs = { version = "0.1.0", path = "../libac-rs", default-features = false, features = ["core"] }
 schemars = { version = "0.8", features = ["derive"] }
 serde = { version = "1.0.219", features = ["derive"] }
 serde_json = "1.0.140"
-tokio = { version = "1.45.1", features = ["full"] }
 worker = { version = "0.5.0", features = ["http", "d1"] }
-sqlite = "0.36.1"
+byteorder = "1.5.0"
+byteutils = "0.1.0"
+console_error_panic_hook = { version = "0.1.1" }
+image = { version = "0.25.5", default-features = false, features = ["png"] }
+
+# Optional dependencies for non-WASM builds
+sqlite = { version = "0.36.1", optional = true }
+tokio = { version = "1.45.1", features = ["rt-multi-thread", "macros", "time", "io-util"], optional = true }
+dropshot = { version = "0.16.2", optional = true }
+
+[features]
+default = []
+dropshot = ["dep:dropshot", "dep:tokio", "dep:sqlite"]

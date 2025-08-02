@@ -1,3 +1,5 @@
+#![cfg(feature = "dropshot")]
+
 use std::net::{Ipv4Addr, SocketAddr};
 
 use dropshot::{

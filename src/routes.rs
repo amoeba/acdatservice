@@ -32,7 +32,7 @@ pub async fn index_get(_ctx: RouteContext<()>) -> Result<Response> {
         PathItem {
             get: Some(Operation {
                 summary: "Get an icon".to_string(),
-                description: "Returns a PNG icon with optional scaling applied, and any provided underlay, overlay, or UI effect mixed in. Example https://dats.treestats.net/icons/26967?scale=2.".to_string(),
+                description: "Returns a PNG icon with optional scaling applied and any provided underlay, overlay, or UI effect mixed in. Example https://dats.treestats.net/icons/26967?scale=2.".to_string(),
                 operation_id: "icons_get".to_string(),
                 parameters: vec![Parameter {
                     name: "icon_id".to_string(),

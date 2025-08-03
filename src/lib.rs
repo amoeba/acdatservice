@@ -36,20 +36,6 @@ pub async fn get_buf_for_file(
     file: &db::File,
 ) -> std::result::Result<Vec<u8>, worker::Error> {
     let bucket = ctx.bucket("DATS_BUCKET")?;
-    console_debug!("bucket: {:?}", bucket);
-
-    match bucket.list().execute().await {
-        Ok(list_result) => {
-            console_debug!("Objects in bucket:");
-            for object in list_result.objects() {
-                console_debug!("  - {}", object.key());
-            }
-        }
-        Err(e) => {
-            console_error!("Failed to list bucket contents: {:?}", e);
-        }
-    }
-
     let mut worker_reader = WorkerR2RangeReader::new(bucket, "client_portal.dat".to_string());
     let mut reader = DatFileReader::new(file.size as usize, 1024 as usize)
         .map_err(|e| worker::Error::RustError(format!("Failed to create reader: {}", e)))?;
@@ -57,25 +43,6 @@ pub async fn get_buf_for_file(
         .read_file(&mut worker_reader, file.offset as u32)
         .await
         .map_err(|e| worker::Error::RustError(format!("Failed to read_file: {}", e)))?;
-
-    // let result = reader
-    //     .read_file(&mut reader, reader.file_offset)
-    //     .await
-    //     .unwrap();
-
-    // let builder = bucket.get("client_portal.dat");
-    // let data = builder
-    //     .range(Range::OffsetWithLength {
-    //         offset: file.offset + 8, // 8 is the first two DWORDS before the texture
-    //         length: file.size as u64,
-    //     })
-    //     .execute()
-    //     .await?;
-    console_debug!(
-        "get_buf_for_file: file.offset = {}, file.size = {}",
-        file.offset,
-        file.size as u64
-    );
 
     Ok(buf)
 }

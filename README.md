@@ -16,7 +16,9 @@ I don't have a guide but please reach out if you'd like to contribute and want h
 
 Note that this crate must use the same version of the `worker` crate because of type sharing with libac-rs.
 
-### Updating CloudFlare D1
+## Deployment
+
+### Updating Cloudflare D1
 
 To update the index on D1, run
 
@@ -26,4 +28,10 @@ cargo run --bin create_index --features=index -- client_portal.dat
 sh scripts/sync_d1.sh
 # this dumps the database we just created, converts it to .sql, and executes
 # on cloudflare
+```
+
+### Deploy to Cloudflare Workers
+
+```sh
+npx wrangler deploy
 ```

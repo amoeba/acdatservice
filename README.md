@@ -23,4 +23,7 @@ To update the index on D1, run
 ```sh
 cargo run --bin create_index --features=index -- client_portal.dat
 # this creates data/index.sqlite
+sh scripts/sync_d1.sh
+# this dumps the database we just created, converts it to .sql, and executes
+# on cloudflare
 ```

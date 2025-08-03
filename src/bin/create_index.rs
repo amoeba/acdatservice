@@ -1,11 +1,14 @@
 #![cfg(feature = "index")]
 
 use libac_rs::dat::{
-    enums::dat_file_type::{DatFileSubtype, DatFileType},
+    enums::{
+        dat_database_type::DatDatabaseType,
+        dat_file_type::{DatFileSubtype, DatFileType},
+    },
     file_types::{dat_file::DatFile, texture::Texture},
     reader::{
-        file_reader::FileRangeReader, sync_dat_file_reader::SyncDatFileReader,
-        sync_file_reader::SyncFileRangeReader, types::dat_database::DatDatabase,
+        sync_dat_file_reader::SyncDatFileReader, sync_file_reader::SyncFileRangeReader,
+        types::dat_database::DatDatabase,
     },
 };
 use sqlite::{self, Connection};
@@ -24,6 +27,14 @@ fn setup() -> Result<(), Box<dyn std::error::Error>> {
 }
 
 fn migrate(connection: &Connection) -> Result<(), Box<dyn std::error::Error>> {
+    connection.execute("DROP TABLE IF EXISTS database_types;")?;
+    connection.execute(
+        "CREATE TABLE IF NOT EXISTS database_types (
+            id INTEGER NOT NULL,
+            name TEXT NOT NULL
+        )",
+    )?;
+
     connection.execute("DROP TABLE IF EXISTS file_types;")?;
     connection.execute(
         "CREATE TABLE IF NOT EXISTS file_types (
@@ -45,9 +56,11 @@ fn migrate(connection: &Connection) -> Result<(), Box<dyn std::error::Error>> {
     connection.execute(
         "CREATE TABLE IF NOT EXISTS files (
             id INTEGER NOT NULL,
+            db_type INTEGER NOT NULL,
             type INTEGER NOT NULL,
             subtype INTEGER,
             offset INTEGER NOT NULL,
+            size INTEGER NOT NULL,
             extra_info JSON
         )",
     )?;
@@ -56,6 +69,14 @@ fn migrate(connection: &Connection) -> Result<(), Box<dyn std::error::Error>> {
 }
 
 fn seed(connection: &Connection) -> Result<(), Box<dyn std::error::Error>> {
+    // database_types
+    for db_type in DatDatabaseType::iter() {
+        let mut statement = connection.prepare("INSERT INTO database_types VALUES(?, ?);")?;
+        statement.bind((1, db_type.as_u32() as i64))?;
+        statement.bind((2, db_type.to_string().as_str()))?;
+        statement.next()?; // Is this really how we execute a prepared statement?
+    }
+
     // file_types
     for file_type in DatFileType::iter() {
         let mut statement = connection.prepare("INSERT INTO file_types VALUES(?, ?);")?;
@@ -69,7 +90,7 @@ fn seed(connection: &Connection) -> Result<(), Box<dyn std::error::Error>> {
     let mut statement = connection.prepare("INSERT INTO file_subtypes VALUES(?, ?, ?);")?;
     statement.bind((1, DatFileSubtype::Icon.as_u32() as i64))?;
     statement.bind((2, DatFileType::Texture.as_u32() as i64))?;
-    statement.bind((3, DatFileType::Texture.to_string().as_str()))?;
+    statement.bind((3, DatFileSubtype::Icon.to_string().as_str()))?;
     statement.next()?; // Is this really how we execute a prepared statement?
 
     Ok(())
@@ -98,13 +119,16 @@ fn create_index(connection: &Connection, dat_path: &str) -> Result<(), Box<dyn s
 
         let dat_file_type = file.file_type();
 
-        let mut statement = connection
-            .prepare("INSERT INTO files (id, type, subtype, offset) VALUES (?, ?, ?, ?)")?;
+        let mut statement = connection.prepare(
+            "INSERT INTO files (id, db_type, type, subtype, offset, size) VALUES (?, ?, ?, ?, ?, ?)",
+        )?;
 
         statement.bind((1, file.object_id as i64))?;
-        statement.bind((2, dat_file_type.as_u32() as i64))?;
+        statement.bind((2, DatDatabaseType::Portal.as_u32() as i64))?;
+        statement.bind((3, dat_file_type.as_u32() as i64))?;
 
         // Read the entire file so we can find out its subtype, if anye
+        let subtype_col_index = 4;
         let mut reader =
             SyncDatFileReader::new(file.file_size as usize, db.header.block_size as usize)?;
         let buf = reader.read_file(&mut db_file_reader, file.file_offset)?;
@@ -115,18 +139,18 @@ fn create_index(connection: &Connection, dat_path: &str) -> Result<(), Box<dyn s
                 let outer_file: DatFile<Texture> = DatFile::read(&mut buf_reader)?;
                 let icon = outer_file.inner;
                 if icon.width == 32 && icon.height == 32 {
-                    statement.bind((3, DatFileSubtype::Icon.as_u32() as i64))?;
+                    statement.bind((subtype_col_index, DatFileSubtype::Icon.as_u32() as i64))?;
                 } else {
-                    statement.bind((3, DatFileSubtype::Unknown.as_u32() as i64))?;
+                    statement.bind((subtype_col_index, DatFileSubtype::Unknown.as_u32() as i64))?;
                 }
             }
             DatFileType::Unknown => {
-                statement.bind((3, DatFileSubtype::Unknown.as_u32() as i64))?;
+                statement.bind((subtype_col_index, DatFileSubtype::Unknown.as_u32() as i64))?;
             }
         }
 
-        statement.bind((4, file.file_offset as i64))?;
-
+        statement.bind((5, file.file_offset as i64))?;
+        statement.bind((6, file.file_size as i64))?;
         statement.next()?;
     }
 

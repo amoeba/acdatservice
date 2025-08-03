@@ -13,7 +13,7 @@ wasm-opt = false
 
 [[bin]]
 name = "create_index"
-required-features = ["sqlite"]
+required-features = ["index"]
 
 [[bin]]
 name = "dropshot_server"
@@ -37,6 +37,7 @@ console_error_panic_hook = { version = "0.1.1" }
 image = { version = "0.25.5", default-features = false, features = ["png"] }
 
 # Optional dependencies for non-WASM builds
+dropshot = { version = "0.16.2", optional = true }
 sqlite = { version = "0.36.1", optional = true }
 tokio = { version = "1.45.1", features = [
   "rt-multi-thread",
@@ -44,8 +45,9 @@ tokio = { version = "1.45.1", features = [
   "time",
   "io-util",
 ], optional = true }
-dropshot = { version = "0.16.2", optional = true }
+strum = { version = "0.27.2", features = ["derive"], optional = true }
 
 [features]
-default = []
-dropshot = ["dep:dropshot", "dep:tokio", "dep:sqlite"]
+default = ["index"]
+dropshot = ["dep:dropshot", "dep:tokio"]
+index = ["dep:sqlite", "dep:strum"]

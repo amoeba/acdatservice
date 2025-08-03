@@ -1904,6 +1904,7 @@ dependencies = [
  "serde",
  "serde_json",
  "sqlite",
+ "strum",
  "tokio",
  "worker",
 ]

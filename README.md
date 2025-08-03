@@ -15,3 +15,12 @@ Development involves using the wrangler CLI and a Cloudflare account with the co
 I don't have a guide but please reach out if you'd like to contribute and want help.
 
 Note that this crate must use the same version of the `worker` crate because of type sharing with libac-rs.
+
+### Updating CloudFlare D1
+
+To update the index on D1, run
+
+```sh
+cargo run --bin create_index --features=index -- client_portal.dat
+# this creates data/index.sqlite
+```

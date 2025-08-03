@@ -1,5 +1,8 @@
 use libac_rs::{
-    dat::file_types::{dat_file::DatFileRead, texture::Texture},
+    dat::file_types::{
+        dat_file::{DatFile, DatFileRead},
+        texture::Texture,
+    },
     icon::Icon,
 };
 use std::{collections::HashMap, fmt::Debug, io::Cursor};
@@ -298,14 +301,10 @@ pub async fn icons_get(url: Url, ctx: RouteContext<()>) -> Result<Response> {
                 }
             };
 
-            // Create icon
-            let underlay_object = get_buf_for_file(&ctx, &underlay_file).await?;
-
-            let mut reader = Cursor::new(underlay_object);
-            let underlay_texture = match Texture::read(&mut reader) {
-                Ok(val) => val,
-                Err(e) => return Response::error(format!("Failed to instantiate : {}", e), 400),
-            };
+            let underlay_object: Vec<u8> = get_buf_for_file(&ctx, &underlay_file).await?;
+            let mut buf_reader = Cursor::new(underlay_object);
+            let underlay_file: DatFile<Texture> = DatFile::read(&mut buf_reader)?;
+            let underlay_texture = underlay_file.inner;
 
             Some(underlay_texture)
         }
@@ -324,13 +323,10 @@ pub async fn icons_get(url: Url, ctx: RouteContext<()>) -> Result<Response> {
                 }
             };
 
-            let overlay_object = get_buf_for_file(&ctx, &overlay_file).await?;
-
-            let mut reader = Cursor::new(overlay_object);
-            let overlay_texture = match Texture::read(&mut reader) {
-                Ok(val) => val,
-                Err(e) => return Response::error(format!("Failed to instantiate : {}", e), 400),
-            };
+            let overlay_object: Vec<u8> = get_buf_for_file(&ctx, &overlay_file).await?;
+            let mut buf_reader = Cursor::new(overlay_object);
+            let overlay_file: DatFile<Texture> = DatFile::read(&mut buf_reader)?;
+            let overlay_texture = overlay_file.inner;
 
             Some(overlay_texture)
         }
@@ -349,13 +345,10 @@ pub async fn icons_get(url: Url, ctx: RouteContext<()>) -> Result<Response> {
                 }
             };
 
-            let overlay2_object = get_buf_for_file(&ctx, &overlay2_file).await?;
-
-            let mut reader = Cursor::new(overlay2_object);
-            let overlay2_texture = match Texture::read(&mut reader) {
-                Ok(val) => val,
-                Err(e) => return Response::error(format!("Failed to instantiate : {}", e), 400),
-            };
+            let overlay2_object: Vec<u8> = get_buf_for_file(&ctx, &overlay2_file).await?;
+            let mut buf_reader = Cursor::new(overlay2_object);
+            let overlay2_file: DatFile<Texture> = DatFile::read(&mut buf_reader)?;
+            let overlay2_texture = overlay2_file.inner;
 
             Some(overlay2_texture)
         }
@@ -374,13 +367,10 @@ pub async fn icons_get(url: Url, ctx: RouteContext<()>) -> Result<Response> {
                 }
             };
 
-            let effect_object = get_buf_for_file(&ctx, &effect_file).await?;
-
-            let mut reader = Cursor::new(effect_object);
-            let effect_texture = match Texture::read(&mut reader) {
-                Ok(val) => val,
-                Err(e) => return Response::error(format!("Failed to instantiate : {}", e), 400),
-            };
+            let effect_object: Vec<u8> = get_buf_for_file(&ctx, &effect_file).await?;
+            let mut buf_reader = Cursor::new(effect_object);
+            let effect_file: DatFile<Texture> = DatFile::read(&mut buf_reader)?;
+            let effect_texture = effect_file.inner;
 
             Some(effect_texture)
         }
@@ -400,12 +390,9 @@ pub async fn icons_get(url: Url, ctx: RouteContext<()>) -> Result<Response> {
 
     // Create icon
     let base_object = get_buf_for_file(&ctx, &base_file).await?;
-
-    let mut reader = Cursor::new(base_object);
-    let base_texture = match Texture::read(&mut reader) {
-        Ok(val) => val,
-        Err(e) => return Response::error(format!("Failed to instantiate : {}", e), 400),
-    };
+    let mut buf_reader = Cursor::new(base_object);
+    let outer_file: DatFile<Texture> = DatFile::read(&mut buf_reader)?;
+    let base_texture = outer_file.inner;
 
     let icon: Icon = Icon {
         width: 32,

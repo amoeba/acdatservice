@@ -3,6 +3,25 @@
 version = 4
 
 [[package]]
+name = "acdatservice"
+version = "0.1.0"
+dependencies = [
+ "byteorder",
+ "byteutils",
+ "console_error_panic_hook",
+ "dropshot",
+ "image",
+ "libac-rs",
+ "schemars",
+ "serde",
+ "serde_json",
+ "sqlite",
+ "strum",
+ "tokio",
+ "worker",
+]
+
+[[package]]
 name = "addr2line"
 version = "0.24.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1888,25 +1907,6 @@ dependencies = [
  "libc",
  "untrusted",
  "windows-sys 0.52.0",
-]
-
-[[package]]
-name = "rsw"
-version = "0.1.0"
-dependencies = [
- "byteorder",
- "byteutils",
- "console_error_panic_hook",
- "dropshot",
- "image",
- "libac-rs",
- "schemars",
- "serde",
- "serde_json",
- "sqlite",
- "strum",
- "tokio",
- "worker",
 ]
 
 [[package]]

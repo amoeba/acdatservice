@@ -32,12 +32,12 @@ pub async fn index_get(_ctx: RouteContext<()>) -> Result<Response> {
         PathItem {
             get: Some(Operation {
                 summary: "Get an icon".to_string(),
-                description: "Returns a PNG icon with optional scaling applied and any provided underlay, overlay, or UI effect mixed in. Example https://dats.treestats.net/icons/26967?scale=2.".to_string(),
+                description: "Returns a PNG icon with optional scaling applied and any provided underlay, overlay, or UI effect mixed in. Example https://dats.treestats.net/icons/26967?scale=2. All Icon IDs can be passed as decimal or hex and either absolute or relative (to 0x06000000) values can be used. For example, all of these values return the same icon: 0x6957, 0x06006957, 26967, 100690263.".to_string(),
                 operation_id: "icons_get".to_string(),
                 parameters: vec![Parameter {
                     name: "icon_id".to_string(),
                     location: "path".to_string(),
-                    description: "Icon ID as decimal or hex. Accepts absolute or relative values. For example, all of these values return the same icon: 0x6957, 0x06006957, 26967, 100690263.".to_string(),
+                    description: "Icon ID as decimal or hex. Accepts absolute or relative values.".to_string(),
                     required: true,
                     schema: Schema::ObjectSchema {
                         schema_type: "string".to_string(),

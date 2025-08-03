@@ -37,10 +37,10 @@ pub async fn get_buf_for_file(
 ) -> std::result::Result<Vec<u8>, worker::Error> {
     let bucket = ctx.bucket("DATS_BUCKET")?;
     let mut worker_reader = WorkerR2RangeReader::new(bucket, "client_portal.dat".to_string());
-    let mut reader = DatFileReader::new(file.size as usize, 1024 as usize)
+    let mut reader = DatFileReader::new(file.file_size as usize, 1024 as usize)
         .map_err(|e| worker::Error::RustError(format!("Failed to create reader: {}", e)))?;
     let buf = reader
-        .read_file(&mut worker_reader, file.offset as u32)
+        .read_file(&mut worker_reader, file.file_offset as u32)
         .await
         .map_err(|e| worker::Error::RustError(format!("Failed to read_file: {}", e)))?;
 

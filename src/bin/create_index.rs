@@ -56,11 +56,11 @@ fn migrate(connection: &Connection) -> Result<(), Box<dyn std::error::Error>> {
     connection.execute(
         "CREATE TABLE IF NOT EXISTS files (
             id INTEGER NOT NULL,
-            db_type INTEGER NOT NULL,
-            type INTEGER NOT NULL,
-            subtype INTEGER,
-            offset INTEGER NOT NULL,
-            size INTEGER NOT NULL,
+            database_type INTEGER NOT NULL,
+            file_type INTEGER NOT NULL,
+            file_subtype INTEGER,
+            file_offset INTEGER NOT NULL,
+            file_size INTEGER NOT NULL,
             extra_info JSON
         )",
     )?;
@@ -120,7 +120,7 @@ fn create_index(connection: &Connection, dat_path: &str) -> Result<(), Box<dyn s
         let dat_file_type = file.file_type();
 
         let mut statement = connection.prepare(
-            "INSERT INTO files (id, db_type, type, subtype, offset, size) VALUES (?, ?, ?, ?, ?, ?)",
+            "INSERT INTO files (id, database_type, file_type, file_subtype, file_offset, file_size) VALUES (?, ?, ?, ?, ?, ?)",
         )?;
 
         statement.bind((1, file.object_id as i64))?;

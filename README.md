@@ -13,3 +13,5 @@ Built with Cloudflare Workers, R2, and D1.
 
 Development involves using the wrangler CLI and a Cloudflare account with the correct resources setup.
 I don't have a guide but please reach out if you'd like to contribute and want help.
+
+Note that this crate must use the same version of the `worker` crate because of type sharing with libac-rs.

@@ -2,6 +2,9 @@ use std::error::Error;
 use std::io::Cursor;
 
 use byteorder::{BigEndian, ReadBytesExt};
+use libac_rs::dat::reader::{
+    dat_file_reader::DatFileReader, worker_r2_reader::WorkerR2RangeReader,
+};
 use routes::{icons_get, icons_index, index_get};
 use worker::*;
 
@@ -33,26 +36,48 @@ pub async fn get_buf_for_file(
     file: &db::File,
 ) -> std::result::Result<Vec<u8>, worker::Error> {
     let bucket = ctx.bucket("DATS_BUCKET")?;
-    let builder = bucket.get("client_portal.dat");
-    let data = builder
-        .range(Range::OffsetWithLength {
-            offset: file.offset + 8, // 8 is the first two DWORDS before the texture
-            length: file.size as u64,
-        })
-        .execute()
-        .await?;
+    console_debug!("bucket: {:?}", bucket);
 
+    match bucket.list().execute().await {
+        Ok(list_result) => {
+            console_debug!("Objects in bucket:");
+            for object in list_result.objects() {
+                console_debug!("  - {}", object.key());
+            }
+        }
+        Err(e) => {
+            console_error!("Failed to list bucket contents: {:?}", e);
+        }
+    }
+
+    let mut worker_reader = WorkerR2RangeReader::new(bucket, "client_portal.dat".to_string());
+    let mut reader = DatFileReader::new(file.size as usize, 1024 as usize)
+        .map_err(|e| worker::Error::RustError(format!("Failed to create reader: {}", e)))?;
+    let buf = reader
+        .read_file(&mut worker_reader, 0)
+        .await
+        .map_err(|e| worker::Error::RustError(format!("Failed to read_file: {}", e)))?;
+
+    // let result = reader
+    //     .read_file(&mut reader, reader.file_offset)
+    //     .await
+    //     .unwrap();
+
+    // let builder = bucket.get("client_portal.dat");
+    // let data = builder
+    //     .range(Range::OffsetWithLength {
+    //         offset: file.offset + 8, // 8 is the first two DWORDS before the texture
+    //         length: file.size as u64,
+    //     })
+    //     .execute()
+    //     .await?;
     console_debug!(
         "get_buf_for_file: file.offset = {}, file.size = {}",
         file.offset,
         file.size as u64
     );
-    match data {
-        Some(obj) => Ok(obj.body().unwrap().bytes().await?),
-        None => {
-            Err(std::io::Error::new(std::io::ErrorKind::Other, "failed in get_buf_for_file to get buffer for the file. this code is not very debuggable").into())
-        }
-    }
+
+    Ok(buf)
 }
 
 pub async fn get_file_by_id(ctx: &RouteContext<()>, file_id: i32) -> Result<Option<db::File>> {

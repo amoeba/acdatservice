@@ -54,7 +54,7 @@ pub async fn get_buf_for_file(
     let mut reader = DatFileReader::new(file.size as usize, 1024 as usize)
         .map_err(|e| worker::Error::RustError(format!("Failed to create reader: {}", e)))?;
     let buf = reader
-        .read_file(&mut worker_reader, 0)
+        .read_file(&mut worker_reader, file.offset as u32)
         .await
         .map_err(|e| worker::Error::RustError(format!("Failed to read_file: {}", e)))?;
 

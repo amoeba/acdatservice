@@ -18,6 +18,16 @@ mod tests {
         // This is valid for this function but will get failed later down the
         // parameter validation sequence
         assert_eq!(parse_decimal_or_hex_string("-1234").unwrap(), 100662062);
+
+        // Test this set
+        // 0x6957, 0x06006957, 26967, 100690263
+        assert_eq!(parse_decimal_or_hex_string("0x6957").unwrap(), 100690263);
+        assert_eq!(
+            parse_decimal_or_hex_string("0x06006957").unwrap(),
+            100690263
+        );
+        assert_eq!(parse_decimal_or_hex_string("26967").unwrap(), 100690263);
+        assert_eq!(parse_decimal_or_hex_string("100690263").unwrap(), 100690263);
     }
 
     #[test]

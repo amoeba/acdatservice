@@ -37,7 +37,7 @@ pub async fn index_get(_ctx: RouteContext<()>) -> Result<Response> {
                 parameters: vec![Parameter {
                     name: "icon_id".to_string(),
                     location: "path".to_string(),
-                    description: "Icon ID as decimal or hex, absolute or relative.".to_string(),
+                    description: "Icon ID as decimal or hex. Accepts absolute or relative values. For example, all of these values return the same icon: 0x6957, 0x06006957, 26967, 100690263.".to_string(),
                     required: true,
                     schema: Schema::ObjectSchema {
                         schema_type: "string".to_string(),

@@ -48,6 +48,6 @@ tokio = { version = "1.45.1", features = [
 strum = { version = "0.27.2", features = ["derive"], optional = true }
 
 [features]
-default = ["index"]
+default = []
 dropshot = ["dep:dropshot", "dep:tokio"]
 index = ["dep:sqlite", "dep:strum"]

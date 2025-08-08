@@ -1,10 +1,7 @@
 use libac_rs::{
     dat::{
         enums::dat_file_type::DatFileSubtype,
-        file_types::{
-            dat_file::DatFile,
-            texture::Texture,
-        },
+        file_types::{dat_file::DatFile, texture::Texture},
     },
     icon::Icon,
 };
@@ -35,7 +32,8 @@ pub async fn index_get(_ctx: RouteContext<()>) -> Result<Response> {
         PathItem {
             get: Some(Operation {
                 summary: "List all file IDs".to_string(),
-                description: "Returns a newline-separated list of all file IDs in the database.".to_string(),
+                description: "Returns a newline-separated list of all file IDs in the database."
+                    .to_string(),
                 operation_id: "files_index".to_string(),
                 parameters: vec![],
             }),
@@ -208,34 +206,37 @@ pub async fn index_get(_ctx: RouteContext<()>) -> Result<Response> {
 
 pub async fn files_index(ctx: RouteContext<()>) -> Result<Response> {
     let db = ctx.d1("DATS_DB")?;
-    let statement = db.prepare("SELECT id FROM files");
+    let statement = db.prepare("SELECT * FROM files");
     let query = statement.bind(&[])?;
-    
+
     let results = query.all().await?;
-    let mut file_ids = Vec::new();
-    
+    let mut file_lines = Vec::new();
+
     for result in results.results::<crate::db::File>()? {
-        file_ids.push(result.id.to_string());
+        let json = serde_json::to_string(&result)?;
+        file_lines.push(json);
     }
-    
-    let response_text = file_ids.join("\n");
+
+    let response_text = file_lines.join("\n");
     Response::ok(response_text)
 }
 
 pub async fn icons_index(ctx: RouteContext<()>) -> Result<Response> {
     let db = ctx.d1("DATS_DB")?;
-    let statement = db.prepare("SELECT id FROM files WHERE file_subtype = ?1");
-    let icon_subtype = DatFileSubtype::Icon.as_u32() as i64;
+    let statement = db.prepare("SELECT * FROM files WHERE file_subtype = ?1");
+    // We cast to f64 to apparently work around JS
+    let icon_subtype = DatFileSubtype::Icon.as_u32() as f64;
     let query = statement.bind(&[icon_subtype.into()])?;
-    
+
     let results = query.all().await?;
-    let mut icon_ids = Vec::new();
-    
+    let mut icon_lines = Vec::new();
+
     for result in results.results::<crate::db::File>()? {
-        icon_ids.push(result.id.to_string());
+        let json = serde_json::to_string(&result)?;
+        icon_lines.push(json);
     }
-    
-    let response_text = icon_ids.join("\n");
+
+    let response_text = icon_lines.join("\n");
     Response::ok(response_text)
 }
 

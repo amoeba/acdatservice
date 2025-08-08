@@ -3,11 +3,14 @@
 Service for dynamically serving Asheron's Call Cell and Portal DAT resources.
 Built with Cloudflare Workers, R2, and D1.
 
-## Status
+## API Routes
 
-- Icons
-  - Get icon as PNG, scale from 1x-8x
-  - Example: <https://dats.treestats.net/icons/26967?scale=2>
+| Route | Description | Example |
+|-------|-------------|---------|
+| [`/`](https://dats.treestats.net/) | OpenAPI specification | [`https://dats.treestats.net/`](https://dats.treestats.net/) |
+| [`/files`](https://dats.treestats.net/files) | List all file IDs | [`https://dats.treestats.net/files`](https://dats.treestats.net/files) |
+| [`/icons`](https://dats.treestats.net/icons) | List all icon IDs | [`https://dats.treestats.net/icons`](https://dats.treestats.net/icons) |
+| [`/icons/:id`](https://dats.treestats.net/icons/26967) | Get icon as PNG | [`https://dats.treestats.net/icons/26967?scale=2`](https://dats.treestats.net/icons/26967?scale=2) |
 
 ## Development
 

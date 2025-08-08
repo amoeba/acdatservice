@@ -5,7 +5,7 @@ use byteorder::{BigEndian, ReadBytesExt};
 use libac_rs::dat::reader::{
     dat_file_reader::DatFileReader, worker_r2_reader::WorkerR2RangeReader,
 };
-use routes::{icons_get, icons_index, index_get};
+use routes::{files_index, icons_get, icons_index, index_get};
 use worker::*;
 
 mod db;
@@ -23,6 +23,7 @@ async fn fetch(req: Request, env: Env, _ctx: Context) -> Result<Response> {
     let url_string = req.url()?;
     router
         .get_async("/", |_, ctx| index_get(ctx))
+        .get_async("/files", |_, ctx| files_index(ctx))
         .get_async("/icons", |_, ctx| icons_index(ctx))
         .get_async("/icons/:id", move |_, ctx| {
             icons_get(url_string.clone(), ctx)

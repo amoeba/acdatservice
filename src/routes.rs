@@ -1,7 +1,10 @@
 use libac_rs::{
-    dat::file_types::{
-        dat_file::{DatFile, DatFileRead},
-        texture::Texture,
+    dat::{
+        enums::dat_file_type::DatFileSubtype,
+        file_types::{
+            dat_file::DatFile,
+            texture::Texture,
+        },
     },
     icon::Icon,
 };
@@ -27,6 +30,28 @@ struct DebugResponse {
 
 pub async fn index_get(_ctx: RouteContext<()>) -> Result<Response> {
     let mut paths = HashMap::new();
+    paths.insert(
+        "/files".to_string(),
+        PathItem {
+            get: Some(Operation {
+                summary: "List all file IDs".to_string(),
+                description: "Returns a newline-separated list of all file IDs in the database.".to_string(),
+                operation_id: "files_index".to_string(),
+                parameters: vec![],
+            }),
+        },
+    );
+    paths.insert(
+        "/icons".to_string(),
+        PathItem {
+            get: Some(Operation {
+                summary: "List all icon IDs".to_string(),
+                description: "Returns a newline-separated list of all icon IDs in the database (files with Icon subtype).".to_string(),
+                operation_id: "icons_index".to_string(),
+                parameters: vec![],
+            }),
+        },
+    );
     paths.insert(
         "/icons/:icon_id".to_string(),
         PathItem {
@@ -181,9 +206,37 @@ pub async fn index_get(_ctx: RouteContext<()>) -> Result<Response> {
     Ok(response)
 }
 
+pub async fn files_index(ctx: RouteContext<()>) -> Result<Response> {
+    let db = ctx.d1("DATS_DB")?;
+    let statement = db.prepare("SELECT id FROM files");
+    let query = statement.bind(&[])?;
+    
+    let results = query.all().await?;
+    let mut file_ids = Vec::new();
+    
+    for result in results.results::<crate::db::File>()? {
+        file_ids.push(result.id.to_string());
+    }
+    
+    let response_text = file_ids.join("\n");
+    Response::ok(response_text)
+}
+
 pub async fn icons_index(ctx: RouteContext<()>) -> Result<Response> {
-    let _ = ctx;
-    Response::ok("See / for OpenAPI spec.")
+    let db = ctx.d1("DATS_DB")?;
+    let statement = db.prepare("SELECT id FROM files WHERE file_subtype = ?1");
+    let icon_subtype = DatFileSubtype::Icon.as_u32() as i64;
+    let query = statement.bind(&[icon_subtype.into()])?;
+    
+    let results = query.all().await?;
+    let mut icon_ids = Vec::new();
+    
+    for result in results.results::<crate::db::File>()? {
+        icon_ids.push(result.id.to_string());
+    }
+    
+    let response_text = icon_ids.join("\n");
+    Response::ok(response_text)
 }
 
 pub async fn icons_get(url: Url, ctx: RouteContext<()>) -> Result<Response> {

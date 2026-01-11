@@ -1,4 +1,4 @@
-use libac_rs::icon::Icon;
+use acprotocol::dat::Icon;
 use worker::*;
 
 pub async fn generate_icon(icon: &Icon) -> Result<Response> {

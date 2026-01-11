@@ -1,9 +1,9 @@
-use libac_rs::{
+use acprotocol::{
     dat::{
-        enums::dat_file_type::DatFileSubtype,
+        DatFileSubtype,
         file_types::{dat_file::DatFile, texture::Texture},
+        Icon,
     },
-    icon::Icon,
 };
 use std::{collections::HashMap, fmt::Debug, io::Cursor};
 use worker::*;

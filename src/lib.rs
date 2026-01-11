@@ -2,7 +2,7 @@ use std::error::Error;
 use std::io::Cursor;
 
 use byteorder::{BigEndian, ReadBytesExt};
-use libac_rs::dat::reader::{
+use acprotocol::dat::reader::{
     dat_file_reader::DatFileReader, worker_r2_reader::WorkerR2RangeReader,
 };
 use routes::{files_index, icons_get, icons_index, index_get};

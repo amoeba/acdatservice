@@ -1,9 +1,6 @@
-use acprotocol::{
-    dat::{
-        DatFileSubtype,
-        file_types::{dat_file::DatFile, texture::Texture},
-        Icon,
-    },
+use acprotocol::dat::{
+    file_types::{dat_file::DatFile, texture::Texture},
+    DatFileSubtype, Icon,
 };
 use std::{collections::HashMap, fmt::Debug, io::Cursor};
 use worker::*;

@@ -3,8 +3,6 @@ use acprotocol::dat::IconExportOptions;
 use worker::*;
 
 pub async fn generate_icon(icon: &Icon) -> Result<Response> {
-    console_debug!("{:?}", icon);
-
     let options = IconExportOptions {
         convert_white_to_black: true,
     };

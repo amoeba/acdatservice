@@ -1,12 +1,8 @@
 use acprotocol::dat::Icon;
-use acprotocol::dat::IconExportOptions;
 use worker::*;
 
 pub async fn generate_icon(icon: &Icon) -> Result<Response> {
-    let options = IconExportOptions {
-        convert_white_to_black: true,
-    };
-    let buf = icon.export_with_options(&options)?;
+    let buf = icon.export()?;
 
     let mut response = Response::from_body(worker::ResponseBody::Body(buf))?;
 

@@ -24,7 +24,7 @@ name = "dropshot_server"
 required-features = ["dropshot"]
 
 [dependencies]
-acprotocol = { path = "../asheron-rs/crates/acprotocol", default-features = false, features = [
+acprotocol = { git = "https://github.com/amoeba/asheron-rs", rev = "d44a6083447471225d3c4083a69ed21881978bbc", default-features = false, features = [
   "dat-cloudflare",
   "dat-export",
 ] }
@@ -55,7 +55,8 @@ tokio = { version = "1.45.1", features = [
   "macros",
   "rt",
   "time",
-], optional = true }
+] }
+getrandom = { version = "0.2", features = ["js"] }
 
 [features]
 default = []

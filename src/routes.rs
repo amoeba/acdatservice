@@ -1,9 +1,6 @@
-use libac_rs::{
-    dat::{
-        enums::dat_file_type::DatFileSubtype,
-        file_types::{dat_file::DatFile, texture::Texture},
-    },
-    icon::Icon,
+use acprotocol::dat::{
+    file_types::{dat_file::DatFile, texture::Texture},
+    DatFileSubtype, Icon,
 };
 use std::{collections::HashMap, fmt::Debug, io::Cursor};
 use worker::*;
@@ -19,10 +16,10 @@ use crate::{
 struct DebugResponse {
     icon_id: i32,
     scale: u32,
-    underlay: Option<i32>,
-    overlay: Option<i32>,
-    overlay2: Option<i32>,
-    ui_effect: Option<i32>,
+    background: Option<String>,
+    underlay: Option<String>,
+    overlay: Option<String>,
+    ui_effect: Option<String>,
 }
 
 pub async fn index_get(_ctx: RouteContext<()>) -> Result<Response> {
@@ -96,9 +93,28 @@ pub async fn index_get(_ctx: RouteContext<()>) -> Result<Response> {
                     },
                 },
                 Parameter {
+                    name: "background".to_string(),
+                    location: "query".to_string(),
+                    description: "Optional background texture. Accepts texture ID (as decimal or hex, absolute or relative) or an ItemType name (case-insensitive). ItemTypes: melee_weapon, armor, clothing, jewelry, creature, food, money, misc, missile_weapon, container, gem, spell_components, key, caster, portal, promissory_note, mana_stone, service. Use 'random' to select a random ItemType background.".to_string(),
+                    required: false,
+                    schema: Schema::ObjectSchema {
+                        schema_type: "string".to_string(),
+                        default: None,
+                        minimum: None,
+                        maximum: None,
+                        format: None,
+                        min_length: None,
+                        max_length: None,
+                        read_only: None,
+                        description: None,
+                        properties: None,
+                        required: vec![],
+                    },
+                },
+                Parameter {
                     name: "underlay".to_string(),
                     location: "query".to_string(),
-                    description: "Optional underlay icon ID as decimal or hex, absolute or relative.".to_string(),
+                    description: "Optional underlay texture ID as decimal or hex, absolute or relative.".to_string(),
                     required: false,
                     schema: Schema::ObjectSchema {
                         schema_type: "string".to_string(),
@@ -117,26 +133,7 @@ pub async fn index_get(_ctx: RouteContext<()>) -> Result<Response> {
                 Parameter {
                     name: "overlay".to_string(),
                     location: "query".to_string(),
-                    description: "Optional overlay icon ID as decimal or hex, absolute or relative.".to_string(),
-                    required: false,
-                    schema: Schema::ObjectSchema {
-                        schema_type: "string".to_string(),
-                        default: None,
-                        minimum: None,
-                        maximum: None,
-                        format: None,
-                        min_length: None,
-                        max_length: None,
-                        read_only: None,
-                        description: None,
-                        properties: None,
-                        required: vec![],
-                    },
-                },
-                Parameter {
-                    name: "overlay2".to_string(),
-                    location: "query".to_string(),
-                    description: "Optional overlay2 icon ID as decimal or hex, absolute or relative.".to_string(),
+                    description: "Optional overlay texture ID as decimal or hex, absolute or relative.".to_string(),
                     required: false,
                     schema: Schema::ObjectSchema {
                         schema_type: "string".to_string(),
@@ -155,7 +152,7 @@ pub async fn index_get(_ctx: RouteContext<()>) -> Result<Response> {
                 Parameter {
                     name: "ui_effect".to_string(),
                     location: "query".to_string(),
-                    description: "Optional UIEffect icon ID as decimal or hex, absolute or relative.".to_string(),
+                    description: "Optional UI effect texture. Accepts texture ID (as decimal or hex, absolute or relative) or a UiEffects name (case-insensitive). UiEffects: undef (transparent), magical, poisoned, boost_health, boost_mana, boost_stamina, fire, lightning, frost, acid, bludgeoning, slashing, piercing, nether, default (fire+magical), reversed. Use 'random' to select a random UiEffect.".to_string(),
                     required: false,
                     schema: Schema::ObjectSchema {
                         schema_type: "string".to_string(),
@@ -274,7 +271,10 @@ pub async fn icons_get(url: Url, ctx: RouteContext<()>) -> Result<Response> {
         return Response::error("Choose a scale value between 1 and 8", 400);
     }
 
-    // underlay
+    // background - accepts ID or ItemType name
+    let param_background = query_params.get("background").cloned();
+
+    // underlay - accepts ID only
     let param_underlay = match query_params.get("underlay") {
         Some(value) => match parse_decimal_or_hex_string(value) {
             Ok(value) => Some(value),
@@ -291,7 +291,7 @@ pub async fn icons_get(url: Url, ctx: RouteContext<()>) -> Result<Response> {
         None => None,
     };
 
-    // overlay
+    // overlay - accepts ID only
     let param_overlay = match query_params.get("overlay") {
         Some(value) => match parse_decimal_or_hex_string(value) {
             Ok(value) => Some(value),
@@ -308,127 +308,124 @@ pub async fn icons_get(url: Url, ctx: RouteContext<()>) -> Result<Response> {
         None => None,
     };
 
-    // overlay2
-    let param_overlay2 = match query_params.get("overlay2") {
-        Some(value) => match parse_decimal_or_hex_string(value) {
-            Ok(value) => Some(value),
-            Err(err) => {
-                return Response::error(
-                    format!(
-                        "Failed to parse query parameter: overlay2. Error: {}",
-                        err.to_string()
-                    ),
-                    400,
+    // ui_effect - accepts ID or UiEffects name
+    let param_ui_effect = query_params.get("ui_effect").cloned();
+
+    // Helper to load texture by ID
+    async fn load_texture_by_id(
+        ctx: &RouteContext<()>,
+        texture_id: u32,
+    ) -> std::result::Result<Texture, Response> {
+        let texture_file = match get_file_by_id(ctx, texture_id as i32).await {
+            Ok(Some(file)) => file,
+            _ => {
+                return Err(
+                    match Response::error(
+                        format!("Failed to get DAT file for texture ID {:X}", texture_id),
+                        400,
+                    ) {
+                        Ok(resp) => resp,
+                        Err(e) => return Err(Response::from_html(format!("Error: {}", e)).unwrap()),
+                    },
                 )
             }
-        },
-        None => None,
-    };
+        };
 
-    // ui_effect
-    let param_ui_effect = match query_params.get("ui_effect") {
-        Some(value) => match parse_decimal_or_hex_string(value) {
-            Ok(value) => Some(value),
-            Err(err) => {
-                return Response::error(
-                    format!(
-                        "Failed to parse query parameter: ui_effect. Error: {}",
-                        err.to_string()
-                    ),
-                    400,
+        let texture_object: Vec<u8> = match get_buf_for_file(ctx, &texture_file).await {
+            Ok(data) => data,
+            Err(_) => {
+                return Err(
+                    match Response::error(
+                        format!("Failed to read texture file for ID {:X}", texture_id),
+                        400,
+                    ) {
+                        Ok(resp) => resp,
+                        Err(e) => return Err(Response::from_html(format!("Error: {}", e)).unwrap()),
+                    },
                 )
             }
-        },
-        None => None,
+        };
+        let mut buf_reader = Cursor::new(texture_object);
+        let texture_file: DatFile<Texture> = match DatFile::read(&mut buf_reader) {
+            Ok(file) => file,
+            Err(_) => {
+                return Err(
+                    match Response::error("Failed to parse texture file".to_string(), 400) {
+                        Ok(resp) => resp,
+                        Err(e) => return Err(Response::from_html(format!("Error: {}", e)).unwrap()),
+                    },
+                )
+            }
+        };
+        Ok(texture_file.inner)
+    }
+
+    // Load background texture - can be ID or ItemType name
+    let maybe_background = if let Some(bg_str) = param_background {
+        // Try parsing as ID first, then as ItemType name
+        let bg_texture_id = if let Ok(id) = parse_decimal_or_hex_string(&bg_str) {
+            id as u32
+        } else {
+            // Parse as ItemType name
+            match acprotocol::dat::icon::parse_item_type(&bg_str) {
+                Ok(item_type_value) => {
+                    acprotocol::dat::icon::get_background_from_item_type(item_type_value)
+                }
+                Err(e) => return Response::error(format!("Error parsing background: {}", e), 400),
+            }
+        };
+        match load_texture_by_id(&ctx, bg_texture_id).await {
+            Ok(texture) => Some(texture),
+            Err(response) => return Ok(response),
+        }
+    } else {
+        None
     };
 
-    // Get textures for any files we need
-    let maybe_underlay = match param_underlay {
-        Some(val) => {
-            let underlay_file = match get_file_by_id(&ctx, val).await? {
-                Some(val) => val,
-                None => {
-                    return Response::error(
-                        format!("Failed to get DAT file for file with ID {:?}", param_id_num),
-                        400,
-                    )
-                }
-            };
-
-            let underlay_object: Vec<u8> = get_buf_for_file(&ctx, &underlay_file).await?;
-            let mut buf_reader = Cursor::new(underlay_object);
-            let underlay_file: DatFile<Texture> = DatFile::read(&mut buf_reader)?;
-            let underlay_texture = underlay_file.inner;
-
-            Some(underlay_texture)
+    // Load underlay if specified (ID only)
+    let maybe_underlay = if let Some(underlay_id) = param_underlay {
+        match load_texture_by_id(&ctx, underlay_id as u32).await {
+            Ok(texture) => Some(texture),
+            Err(response) => return Ok(response),
         }
-        None => None,
+    } else {
+        None
     };
 
-    let maybe_overlay = match param_overlay {
-        Some(val) => {
-            let overlay_file = match get_file_by_id(&ctx, val).await? {
-                Some(val) => val,
-                None => {
-                    return Response::error(
-                        format!("Failed to get DAT file for file with ID {:?}", param_id_num),
-                        400,
-                    )
-                }
-            };
-
-            let overlay_object: Vec<u8> = get_buf_for_file(&ctx, &overlay_file).await?;
-            let mut buf_reader = Cursor::new(overlay_object);
-            let overlay_file: DatFile<Texture> = DatFile::read(&mut buf_reader)?;
-            let overlay_texture = overlay_file.inner;
-
-            Some(overlay_texture)
+    // Load overlay if specified (ID only)
+    let maybe_overlay = if let Some(overlay_id) = param_overlay {
+        match load_texture_by_id(&ctx, overlay_id as u32).await {
+            Ok(texture) => Some(texture),
+            Err(response) => return Ok(response),
         }
-        None => None,
+    } else {
+        None
     };
 
-    let maybe_overlay2 = match param_overlay2 {
-        Some(val) => {
-            let overlay2_file = match get_file_by_id(&ctx, val).await? {
-                Some(val) => val,
-                None => {
-                    return Response::error(
-                        format!("Failed to get DAT file for file with ID {:?}", param_id_num),
-                        400,
-                    )
+    // Load UI effect - can be ID or UiEffects name, defaults to transparent
+    let ui_effect = if let Some(effect_str) = param_ui_effect {
+        // Try parsing as ID first, then as UiEffects name
+        let effect_texture_id = if let Ok(id) = parse_decimal_or_hex_string(&effect_str) {
+            id as u32
+        } else {
+            // Parse as UiEffects name
+            match acprotocol::dat::icon::parse_ui_effect(&effect_str) {
+                Ok(ui_effect_flags) => {
+                    acprotocol::dat::icon::get_ui_effect_texture_id(ui_effect_flags)
                 }
-            };
-
-            let overlay2_object: Vec<u8> = get_buf_for_file(&ctx, &overlay2_file).await?;
-            let mut buf_reader = Cursor::new(overlay2_object);
-            let overlay2_file: DatFile<Texture> = DatFile::read(&mut buf_reader)?;
-            let overlay2_texture = overlay2_file.inner;
-
-            Some(overlay2_texture)
+                Err(e) => return Response::error(format!("Error parsing ui_effect: {}", e), 400),
+            }
+        };
+        match load_texture_by_id(&ctx, effect_texture_id).await {
+            Ok(texture) => texture,
+            Err(response) => return Ok(response),
         }
-        None => None,
-    };
-
-    let maybe_ui_effect = match param_ui_effect {
-        Some(val) => {
-            let effect_file = match get_file_by_id(&ctx, val).await? {
-                Some(val) => val,
-                None => {
-                    return Response::error(
-                        format!("Failed to get DAT file for file with ID {:?}", param_id_num),
-                        400,
-                    )
-                }
-            };
-
-            let effect_object: Vec<u8> = get_buf_for_file(&ctx, &effect_file).await?;
-            let mut buf_reader = Cursor::new(effect_object);
-            let effect_file: DatFile<Texture> = DatFile::read(&mut buf_reader)?;
-            let effect_texture = effect_file.inner;
-
-            Some(effect_texture)
+    } else {
+        // Default effect (transparent)
+        match load_texture_by_id(&ctx, 0x060011C5).await {
+            Ok(texture) => texture,
+            Err(response) => return Ok(response),
         }
-        None => None,
     };
 
     // Look up Icon by ID against D1 Database
@@ -446,17 +443,17 @@ pub async fn icons_get(url: Url, ctx: RouteContext<()>) -> Result<Response> {
     let base_object = get_buf_for_file(&ctx, &base_file).await?;
     let mut buf_reader = Cursor::new(base_object);
     let outer_file: DatFile<Texture> = DatFile::read(&mut buf_reader)?;
-    let base_texture = outer_file.inner;
+    let icon_texture = outer_file.inner;
 
     let icon: Icon = Icon {
         width: 32,
         height: 32,
         scale: param_scale,
-        base: base_texture,
+        background: maybe_background,
         underlay: maybe_underlay,
+        icon: icon_texture,
         overlay: maybe_overlay,
-        overlay2: maybe_overlay2,
-        effect: maybe_ui_effect,
+        effect: ui_effect,
     };
 
     // Generate the image or error

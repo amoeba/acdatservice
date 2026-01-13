@@ -1,9 +1,7 @@
-use libac_rs::icon::Icon;
+use acprotocol::dat::Icon;
 use worker::*;
 
 pub async fn generate_icon(icon: &Icon) -> Result<Response> {
-    console_debug!("{:?}", icon);
-
     let buf = icon.export()?;
 
     let mut response = Response::from_body(worker::ResponseBody::Body(buf))?;

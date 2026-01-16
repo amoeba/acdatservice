@@ -1,0 +1,13 @@
+{
+  "name": "acdatservice",
+  "version": "0.1.0",
+  "description": "acdatservice",
+  "type": "module",
+  "scripts": {
+    "dev": "wrangler dev",
+    "deploy": "wrangler deploy"
+  },
+  "devDependencies": {
+    "wrangler": "^4.59.2"
+  }
+}

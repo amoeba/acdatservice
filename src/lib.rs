@@ -80,7 +80,7 @@ fn parse_decimal_or_hex_string(text: &str) -> std::result::Result<i32, Box<dyn E
 
         match parse_result {
             Ok(value) => {
-                if value < 0x6957 + 0x6000000 {
+                if value < 0x6000000 {
                     Ok(value + 0x6000000)
                 } else {
                     Ok(value)

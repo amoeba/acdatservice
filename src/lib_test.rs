@@ -31,6 +31,21 @@ mod tests {
     }
 
     #[test]
+    fn test_parse_all_formats_resolve_to_same_value() {
+        // All four formats should resolve to the same absolute ID: 0x06000F5A = 100667226
+        let expected = 0x06000F5A_i32; // 100667226 decimal
+
+        // Short hex (4 digits) - relative, base gets added
+        assert_eq!(parse_decimal_or_hex_string("0x0F5A").unwrap(), expected);
+        // Long hex (8 digits) - absolute, used as-is
+        assert_eq!(parse_decimal_or_hex_string("0x06000F5A").unwrap(), expected);
+        // Short decimal - relative, base gets added
+        assert_eq!(parse_decimal_or_hex_string("3930").unwrap(), expected); // 0x0F5A = 3930
+        // Long decimal - absolute, used as-is
+        assert_eq!(parse_decimal_or_hex_string("100667226").unwrap(), expected);
+    }
+
+    #[test]
     fn test_parse_icon_id_string_errors() {
         assert!(parse_decimal_or_hex_string("").is_err());
         assert!(parse_decimal_or_hex_string("text").is_err());

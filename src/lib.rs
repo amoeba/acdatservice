@@ -14,6 +14,18 @@ mod lib_test;
 mod openapi;
 mod routes;
 
+fn with_cors_headers(mut response: Response) -> Response {
+    let headers = response.headers_mut();
+    headers.set("Access-Control-Allow-Origin", "*").ok();
+    headers
+        .set("Access-Control-Allow-Methods", "GET, POST, OPTIONS")
+        .ok();
+    headers
+        .set("Access-Control-Allow-Headers", "Content-Type")
+        .ok();
+    response
+}
+
 #[event(fetch)]
 async fn fetch(req: Request, env: Env, _ctx: Context) -> Result<Response> {
     console_error_panic_hook::set_once();

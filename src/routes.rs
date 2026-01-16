@@ -9,7 +9,7 @@ use crate::{
     generators::icon::generate_icon,
     get_buf_for_file, get_file_by_id,
     openapi::{Contact, Info, OpenApiDocument, Operation, Parameter, PathItem, Schema, Server},
-    parse_decimal_or_hex_string,
+    parse_decimal_or_hex_string, with_cors_headers,
 };
 
 #[derive(Debug)]
@@ -198,7 +198,7 @@ pub async fn index_get(_ctx: RouteContext<()>) -> Result<Response> {
         .headers_mut()
         .set("Content-Type", "application/json")?;
 
-    Ok(response)
+    Ok(with_cors_headers(response))
 }
 
 pub async fn files_index(ctx: RouteContext<()>) -> Result<Response> {
@@ -215,7 +215,8 @@ pub async fn files_index(ctx: RouteContext<()>) -> Result<Response> {
     }
 
     let response_text = file_lines.join("\n");
-    Response::ok(response_text)
+    let response = Response::ok(response_text)?;
+    Ok(with_cors_headers(response))
 }
 
 pub async fn icons_index(ctx: RouteContext<()>) -> Result<Response> {
@@ -234,7 +235,8 @@ pub async fn icons_index(ctx: RouteContext<()>) -> Result<Response> {
     }
 
     let response_text = icon_lines.join("\n");
-    Response::ok(response_text)
+    let response = Response::ok(response_text)?;
+    Ok(with_cors_headers(response))
 }
 
 pub async fn icons_get(url: Url, ctx: RouteContext<()>) -> Result<Response> {

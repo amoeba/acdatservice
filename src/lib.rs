@@ -14,6 +14,14 @@ mod lib_test;
 mod openapi;
 mod routes;
 
+fn enable_cors(mut response: Response) -> Result<Response> {
+    let headers = response.headers_mut();
+    headers.set("Access-Control-Allow-Origin", "*")?;
+    headers.set("Access-Control-Allow-Methods", "GET, HEAD, OPTIONS")?;
+    headers.set("Access-Control-Allow-Headers", "Content-Type")?;
+    Ok(response)
+}
+
 #[event(fetch)]
 async fn fetch(req: Request, env: Env, _ctx: Context) -> Result<Response> {
     console_error_panic_hook::set_once();
@@ -22,11 +30,30 @@ async fn fetch(req: Request, env: Env, _ctx: Context) -> Result<Response> {
 
     let url_string = req.url()?;
     router
-        .get_async("/", |_, ctx| index_get(ctx))
-        .get_async("/files", |_, ctx| files_index(ctx))
-        .get_async("/icons", |_, ctx| icons_index(ctx))
+        .get_async("/", |_, ctx| async move {
+            index_get(ctx).await.and_then(enable_cors)
+        })
+        .get_async("/files", |_, ctx| async move {
+            files_index(ctx).await.and_then(enable_cors)
+        })
+        .get_async("/icons", |_, ctx| async move {
+            icons_index(ctx).await.and_then(enable_cors)
+        })
         .get_async("/icons/:id", move |_, ctx| {
-            icons_get(url_string.clone(), ctx)
+            let url = url_string.clone();
+            async move {
+                icons_get(url, ctx).await.and_then(enable_cors)
+            }
+        })
+        .options("/*", |_, _| {
+            async {
+                let mut response = Response::ok()?;
+                let headers = response.headers_mut();
+                headers.set("Access-Control-Allow-Origin", "*")?;
+                headers.set("Access-Control-Allow-Methods", "GET, HEAD, OPTIONS")?;
+                headers.set("Access-Control-Allow-Headers", "Content-Type")?;
+                Ok(response)
+            }
         })
         .run(req, env)
         .await

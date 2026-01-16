@@ -459,5 +459,6 @@ pub async fn icons_get(url: Url, ctx: RouteContext<()>) -> Result<Response> {
     };
 
     // Generate the image or error
-    generate_icon(&icon).await
+    let response = generate_icon(&icon).await?;
+    Ok(with_cors_headers(response))
 }

@@ -30,10 +30,16 @@ fn with_cors_headers(mut response: Response) -> Response {
 async fn fetch(req: Request, env: Env, _ctx: Context) -> Result<Response> {
     console_error_panic_hook::set_once();
 
+    // Handle preflight OPTIONS requests
+    if req.method() == Method::Options {
+        let mut response = Response::empty()?;
+        return Ok(with_cors_headers(response));
+    }
+
     let router = Router::new();
 
     let url_string = req.url()?;
-    router
+    let response = router
         .get_async("/", |_, ctx| index_get(ctx))
         .get_async("/files", |_, ctx| files_index(ctx))
         .get_async("/icons", |_, ctx| icons_index(ctx))
@@ -41,7 +47,10 @@ async fn fetch(req: Request, env: Env, _ctx: Context) -> Result<Response> {
             icons_get(url_string.clone(), ctx)
         })
         .run(req, env)
-        .await
+        .await?;
+
+    // Apply CORS headers to all responses
+    Ok(with_cors_headers(response))
 }
 
 pub async fn get_buf_for_file(

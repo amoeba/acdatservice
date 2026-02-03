@@ -41,7 +41,7 @@ mod tests {
         assert_eq!(parse_decimal_or_hex_string("0x06000F5A").unwrap(), expected);
         // Short decimal - relative, base gets added
         assert_eq!(parse_decimal_or_hex_string("3930").unwrap(), expected); // 0x0F5A = 3930
-        // Long decimal - absolute, used as-is
+                                                                            // Long decimal - absolute, used as-is
         assert_eq!(parse_decimal_or_hex_string("100667226").unwrap(), expected);
     }
 

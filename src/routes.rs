@@ -7,9 +7,9 @@ use worker::*;
 
 use crate::{
     generators::icon::generate_icon,
-    get_buf_for_file, get_file_by_id, parse_file_id,
+    get_buf_for_file, get_file_by_id,
     openapi::{Contact, Info, OpenApiDocument, Operation, Parameter, PathItem, Schema, Server},
-    parse_decimal_or_hex_string, with_cors_headers,
+    parse_decimal_or_hex_string, parse_file_id, with_cors_headers,
 };
 
 #[derive(Debug)]

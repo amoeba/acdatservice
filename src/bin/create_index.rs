@@ -1,10 +1,7 @@
 #![cfg(feature = "index")]
 
 use acprotocol::dat::{
-    enums::{
-        dat_database_type::DatDatabaseType,
-        dat_file_type::{DatFileSubtype, DatFileType},
-    },
+    DatDatabaseType, DatFileSubtype, DatFileType,
     file_types::{dat_file::DatFile, texture::Texture},
     reader::{
         sync_dat_file_reader::SyncDatFileReader, sync_file_reader::SyncFileRangeReader,
@@ -19,6 +16,10 @@ use std::{
     path::Path,
 };
 use strum::IntoEnumIterator;
+
+// Type annotation needed for type inference
+type DbType = DatDatabaseType;
+type FileType = DatFileType;
 
 fn setup() -> Result<(), Box<dyn std::error::Error>> {
     fs::create_dir_all("./data")?;
@@ -72,16 +73,18 @@ fn seed(connection: &Connection) -> Result<(), Box<dyn std::error::Error>> {
     // database_types
     for db_type in DatDatabaseType::iter() {
         let mut statement = connection.prepare("INSERT INTO database_types VALUES(?, ?);")?;
-        statement.bind((1, db_type.as_u32() as i64))?;
-        statement.bind((2, db_type.to_string().as_str()))?;
+        let dt: DbType = db_type;
+        statement.bind((1, dt.as_u32() as i64))?;
+        statement.bind((2, dt.to_string().as_str()))?;
         statement.next()?; // Is this really how we execute a prepared statement?
     }
 
     // file_types
     for file_type in DatFileType::iter() {
         let mut statement = connection.prepare("INSERT INTO file_types VALUES(?, ?);")?;
-        statement.bind((1, file_type.as_u32() as i64))?;
-        statement.bind((2, file_type.to_string().as_str()))?;
+        let ft: FileType = file_type;
+        statement.bind((1, ft.as_u32() as i64))?;
+        statement.bind((2, ft.to_string().as_str()))?;
         statement.next()?; // Is this really how we execute a prepared statement?
     }
 

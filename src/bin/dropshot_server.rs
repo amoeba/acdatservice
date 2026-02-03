@@ -3,7 +3,7 @@
 use std::net::{Ipv4Addr, SocketAddr};
 
 use dropshot::{
-    endpoint, ApiDescription, ConfigDropshot, ConfigLogging, ConfigLoggingLevel, Header, HttpError,
+    endpoint, ApiDescription, ConfigDropshot, ConfigLogging, ConfigLoggingLevel, HttpError,
     HttpResponseOk, Path, RequestContext, ServerBuilder,
 };
 use schemars::JsonSchema;
@@ -47,9 +47,7 @@ async fn myapi_dats_get_dat_file(
 ) -> Result<HttpResponseOk<DatFile>, HttpError> {
     let name = path_params.into_inner().name;
 
-    let dat_file = DatFile {
-        name: String::from(name),
-    };
+    let dat_file = DatFile { name };
     Ok(HttpResponseOk(dat_file))
 }
 
@@ -81,10 +79,10 @@ fn list_files() -> Result<Vec<FileEntry>, Box<dyn std::error::Error>> {
         let offset: i64 = statement.read(3)?;
 
         files.push(FileEntry {
-            id: id,
-            file_type: file_type,
+            id,
+            file_type,
             subtype: file_subtype,
-            offset: offset,
+            offset,
         });
     }
 
@@ -106,11 +104,9 @@ async fn myapi_files_index(
             let response = FilesResponse { files };
             Ok(HttpResponseOk(response))
         }
-        Err(e) => {
-            return Err(HttpError::for_internal_error(
-                format!("Failed to execute list files query: {:?}", e).to_string(),
-            ))
-        }
+        Err(e) => Err(HttpError::for_internal_error(
+            format!("Failed to execute list files query: {:?}", e).to_string(),
+        ))
     }
 }
 
@@ -167,12 +163,10 @@ async fn myapi_test_byte_ranges(
 
             Ok(HttpResponseOk(response))
         }
-        None => {
-            return Err(HttpError::for_bad_request(
-                Some("400".to_string()),
-                "Range header not passed.".to_string(),
-            ))
-        }
+        None => Err(HttpError::for_bad_request(
+            Some("400".to_string()),
+            "Range header not passed.".to_string(),
+        ))
     }
 }
 

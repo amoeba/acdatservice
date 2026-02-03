@@ -25,7 +25,7 @@ dependencies = [
 [[package]]
 name = "acprotocol"
 version = "0.1.0"
-source = "git+https://github.com/amoeba/asheron-rs?rev=d44a6083447471225d3c4083a69ed21881978bbc#d44a6083447471225d3c4083a69ed21881978bbc"
+source = "git+https://github.com/amoeba/asheron-rs?rev=87a62dcac6ec8c42a195ad5808e7e1bb8cd97b99#87a62dcac6ec8c42a195ad5808e7e1bb8cd97b99"
 dependencies = [
  "anyhow",
  "bitflags",
@@ -435,7 +435,7 @@ checksum = "c3e64b0cc0439b12df2fa678eae89a1c56a529fd067a9115f7827f1fffd22b32"
 [[package]]
 name = "codegen"
 version = "0.1.0"
-source = "git+https://github.com/amoeba/asheron-rs?rev=d44a6083447471225d3c4083a69ed21881978bbc#d44a6083447471225d3c4083a69ed21881978bbc"
+source = "git+https://github.com/amoeba/asheron-rs?rev=87a62dcac6ec8c42a195ad5808e7e1bb8cd97b99#87a62dcac6ec8c42a195ad5808e7e1bb8cd97b99"
 dependencies = [
  "env_logger",
  "log",

@@ -5,7 +5,7 @@ use acprotocol::dat::reader::{
     dat_file_reader::DatFileReader, worker_r2_reader::WorkerR2RangeReader,
 };
 use byteorder::{BigEndian, ReadBytesExt};
-use routes::{files_index, icons_get, icons_index, index_get};
+use routes::{files_get, files_index, icons_get, icons_index, index_get};
 use worker::*;
 
 mod db;
@@ -32,7 +32,7 @@ async fn fetch(req: Request, env: Env, _ctx: Context) -> Result<Response> {
 
     // Handle preflight OPTIONS requests
     if req.method() == Method::Options {
-        let mut response = Response::empty()?;
+        let response = Response::empty()?;
         return Ok(with_cors_headers(response));
     }
 
@@ -42,6 +42,7 @@ async fn fetch(req: Request, env: Env, _ctx: Context) -> Result<Response> {
     let response = router
         .get_async("/", |_, ctx| index_get(ctx))
         .get_async("/files", |_, ctx| files_index(ctx))
+        .get_async("/files/:file_id", |_, ctx| files_get(ctx))
         .get_async("/icons", |_, ctx| icons_index(ctx))
         .get_async("/icons/:id", move |_, ctx| {
             icons_get(url_string.clone(), ctx)
@@ -75,6 +76,16 @@ pub async fn get_file_by_id(ctx: &RouteContext<()>, file_id: i32) -> Result<Opti
     let query = statement.bind(&[file_id.into()])?;
 
     Ok(query.first::<crate::db::File>(None).await?)
+}
+
+/// Parse a file ID from decimal or hex (0x-prefixed) string.
+/// Unlike parse_decimal_or_hex_string, this does not apply any icon-specific offsets.
+pub fn parse_file_id(text: &str) -> std::result::Result<i32, Box<dyn Error>> {
+    if let Some(hex_str) = text.strip_prefix("0x").or_else(|| text.strip_prefix("0X")) {
+        i32::from_str_radix(hex_str, 16).map_err(|e| e.into())
+    } else {
+        text.parse::<i32>().map_err(|e| e.into())
+    }
 }
 
 fn parse_decimal_or_hex_string(text: &str) -> std::result::Result<i32, Box<dyn Error>> {

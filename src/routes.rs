@@ -7,7 +7,7 @@ use worker::*;
 
 use crate::{
     generators::icon::generate_icon,
-    get_buf_for_file, get_file_by_id,
+    get_buf_for_file, get_file_by_id, parse_file_id,
     openapi::{Contact, Info, OpenApiDocument, Operation, Parameter, PathItem, Schema, Server},
     parse_decimal_or_hex_string, with_cors_headers,
 };
@@ -33,6 +33,35 @@ pub async fn index_get(_ctx: RouteContext<()>) -> Result<Response> {
                     .to_string(),
                 operation_id: "files_index".to_string(),
                 parameters: vec![],
+            }),
+        },
+    );
+    paths.insert(
+        "/files/:file_id".to_string(),
+        PathItem {
+            get: Some(Operation {
+                summary: "Get a file by ID".to_string(),
+                description: "Returns the raw binary content of a DAT file by its ID. The file_id can be specified as a decimal number (e.g., 16777217) or as a hex string with 0x prefix (e.g., 0x1000001).".to_string(),
+                operation_id: "files_get".to_string(),
+                parameters: vec![Parameter {
+                    name: "file_id".to_string(),
+                    location: "path".to_string(),
+                    description: "File ID as decimal or hex (0x-prefixed).".to_string(),
+                    required: true,
+                    schema: Schema::ObjectSchema {
+                        schema_type: "string".to_string(),
+                        default: None,
+                        minimum: None,
+                        maximum: None,
+                        format: None,
+                        min_length: None,
+                        max_length: None,
+                        read_only: None,
+                        description: None,
+                        properties: None,
+                        required: vec![],
+                    },
+                }],
             }),
         },
     );
@@ -236,6 +265,37 @@ pub async fn icons_index(ctx: RouteContext<()>) -> Result<Response> {
 
     let response_text = icon_lines.join("\n");
     let response = Response::ok(response_text)?;
+    Ok(with_cors_headers(response))
+}
+
+pub async fn files_get(ctx: RouteContext<()>) -> Result<Response> {
+    let param_file_id = match ctx.param("file_id") {
+        Some(val) => val,
+        None => return Response::error("Must specify file ID.", 400),
+    };
+
+    let file_id = match parse_file_id(param_file_id) {
+        Ok(val) => val,
+        Err(err) => return Response::error(format!("Invalid file ID: {}", err), 400),
+    };
+
+    let file = match get_file_by_id(&ctx, file_id).await? {
+        Some(val) => val,
+        None => {
+            return Response::error(
+                format!("File not found with ID {} (0x{:X})", file_id, file_id),
+                404,
+            )
+        }
+    };
+
+    let file_data = get_buf_for_file(&ctx, &file).await?;
+
+    let mut response = Response::from_bytes(file_data)?;
+    response
+        .headers_mut()
+        .set("Content-Type", "application/octet-stream")?;
+
     Ok(with_cors_headers(response))
 }
 
@@ -455,7 +515,7 @@ pub async fn icons_get(url: Url, ctx: RouteContext<()>) -> Result<Response> {
         underlay: maybe_underlay,
         icon: icon_texture,
         overlay: maybe_overlay,
-        effect: ui_effect,
+        effect: Some(ui_effect),
     };
 
     // Generate the image or error

@@ -1,12 +1,12 @@
 #![cfg(feature = "index")]
 
 use acprotocol::dat::{
-    DatDatabaseType, DatFileSubtype, DatFileType,
     file_types::{dat_file::DatFile, texture::Texture},
     reader::{
         sync_dat_file_reader::SyncDatFileReader, sync_file_reader::SyncFileRangeReader,
         types::dat_database::DatDatabase,
     },
+    DatDatabaseType, DatFileSubtype, DatFileType,
 };
 use sqlite::{self, Connection};
 use std::{

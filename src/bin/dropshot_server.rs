@@ -106,7 +106,7 @@ async fn myapi_files_index(
         }
         Err(e) => Err(HttpError::for_internal_error(
             format!("Failed to execute list files query: {:?}", e).to_string(),
-        ))
+        )),
     }
 }
 
@@ -166,7 +166,7 @@ async fn myapi_test_byte_ranges(
         None => Err(HttpError::for_bad_request(
             Some("400".to_string()),
             "Range header not passed.".to_string(),
-        ))
+        )),
     }
 }
 

@@ -416,10 +416,7 @@ pub async fn icons_get(url: Url, ctx: RouteContext<()>) -> Result<Response> {
             Ok(value) => Some(value),
             Err(err) => {
                 return Response::error(
-                    format!(
-                        "Failed to parse query parameter: underlay. Error: {}",
-                        err
-                    ),
+                    format!("Failed to parse query parameter: underlay. Error: {}", err),
                     400,
                 )
             }
@@ -433,10 +430,7 @@ pub async fn icons_get(url: Url, ctx: RouteContext<()>) -> Result<Response> {
             Ok(value) => Some(value),
             Err(err) => {
                 return Response::error(
-                    format!(
-                        "Failed to parse query parameter: overlay. Error: {}",
-                        err
-                    ),
+                    format!("Failed to parse query parameter: overlay. Error: {}", err),
                     400,
                 )
             }

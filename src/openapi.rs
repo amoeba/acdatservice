@@ -55,17 +55,20 @@ pub struct Parameter {
     pub schema: Schema,
 }
 
+#[allow(dead_code)]
 #[derive(Serialize, Deserialize)]
 struct RequestBody {
     required: bool,
     content: HashMap<String, MediaType>,
 }
 
+#[allow(dead_code)]
 #[derive(Serialize, Deserialize)]
 pub struct MediaType {
     pub schema: Schema,
 }
 
+#[allow(dead_code)]
 #[derive(Serialize, Deserialize)]
 pub struct Response {
     pub description: String,
@@ -73,6 +76,7 @@ pub struct Response {
     pub content: Option<HashMap<String, MediaType>>,
 }
 
+#[allow(clippy::enum_variant_names)]
 #[derive(Serialize, Deserialize)]
 #[serde(untagged)]
 pub enum Schema {
@@ -111,6 +115,7 @@ pub enum Schema {
     },
 }
 
+#[allow(dead_code)]
 #[derive(Serialize, Deserialize)]
 struct Components {
     schemas: HashMap<String, Schema>,

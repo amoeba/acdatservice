@@ -1,6 +1,7 @@
 #[cfg(test)]
 mod tests {
-    use crate::parse_decimal_or_hex_string;
+    use crate::{db::File, parse_decimal_or_hex_string};
+    use acprotocol::dat::DatFileType;
 
     #[test]
     fn test_parse_icon_id_string() {
@@ -52,5 +53,19 @@ mod tests {
         assert!(parse_decimal_or_hex_string("12.34").is_err());
         assert!(parse_decimal_or_hex_string("0x1").is_err());
         assert!(parse_decimal_or_hex_string("0x12345").is_err());
+    }
+
+    #[test]
+    fn test_resolved_file_type_prefers_object_id_mapping() {
+        let file = File {
+            id: 0x0E000002,
+            database_type: 0,
+            file_type: DatFileType::LandBlock.as_u32() as i64,
+            file_subtype: 0,
+            file_offset: 0,
+            file_size: 0,
+        };
+
+        assert_eq!(file.resolved_file_type(), DatFileType::CharacterGenerator);
     }
 }

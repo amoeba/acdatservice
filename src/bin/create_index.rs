@@ -120,7 +120,7 @@ fn create_index(connection: &Connection, dat_path: &str) -> Result<(), Box<dyn s
     for file in files {
         println!("Processing file: {:?}", file);
 
-        let dat_file_type = file.file_type();
+        let dat_file_type = DatFileType::from_object_id(file.object_id);
 
         let mut statement = connection.prepare(
             "INSERT INTO files (id, database_type, file_type, file_subtype, file_offset, file_size) VALUES (?, ?, ?, ?, ?, ?)",
@@ -137,18 +137,18 @@ fn create_index(connection: &Connection, dat_path: &str) -> Result<(), Box<dyn s
         let buf = reader.read_file(&mut db_file_reader, file.file_offset)?;
         let mut buf_reader = Cursor::new(buf);
 
-        match file.file_type() {
+        match dat_file_type {
             DatFileType::Texture => {
                 let outer_file: DatFile<Texture> = DatFile::read(&mut buf_reader)?;
                 let icon = outer_file.inner;
                 if icon.width == 32 && icon.height == 32 {
                     statement.bind((subtype_col_index, DatFileSubtype::Icon.as_u32() as i64))?;
                 } else {
-                    statement.bind((subtype_col_index, DatFileSubtype::Unknown.as_u32() as i64))?;
+                    statement.bind((subtype_col_index, DatFileSubtype::None.as_u32() as i64))?;
                 }
             }
-            DatFileType::Unknown => {
-                statement.bind((subtype_col_index, DatFileSubtype::Unknown.as_u32() as i64))?;
+            _ => {
+                statement.bind((subtype_col_index, DatFileSubtype::None.as_u32() as i64))?;
             }
         }
 

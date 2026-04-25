@@ -1,6 +1,6 @@
 use acprotocol::dat::{
-    file_types::{dat_file::DatFile, texture::Texture},
-    DatFileSubtype, Icon,
+    file_types::{dat_file::DatFile, texture::Texture, CharGen},
+    DatFileSubtype, DatFileType, Icon,
 };
 use std::{collections::HashMap, fmt::Debug, io::Cursor};
 use worker::*;
@@ -12,6 +12,7 @@ use crate::{
     parse_decimal_or_hex_string, parse_file_id, with_cors_headers,
 };
 
+#[allow(dead_code)]
 #[derive(Debug)]
 struct DebugResponse {
     icon_id: i32,
@@ -41,27 +42,48 @@ pub async fn index_get(_ctx: RouteContext<()>) -> Result<Response> {
         PathItem {
             get: Some(Operation {
                 summary: "Get a file by ID".to_string(),
-                description: "Returns the raw binary content of a DAT file by its ID. The file_id can be specified as a decimal number (e.g., 16777217) or as a hex string with 0x prefix (e.g., 0x1000001).".to_string(),
+                description: "Returns the raw binary content of a DAT file by its ID. The file_id can be specified as a decimal number (e.g., 16777217) or as a hex string with 0x prefix (e.g., 0x1000001). Add ?format=json to request a JSON representation for file types that support it.".to_string(),
                 operation_id: "files_get".to_string(),
-                parameters: vec![Parameter {
-                    name: "file_id".to_string(),
-                    location: "path".to_string(),
-                    description: "File ID as decimal or hex (0x-prefixed).".to_string(),
-                    required: true,
-                    schema: Schema::ObjectSchema {
-                        schema_type: "string".to_string(),
-                        default: None,
-                        minimum: None,
-                        maximum: None,
-                        format: None,
-                        min_length: None,
-                        max_length: None,
-                        read_only: None,
-                        description: None,
-                        properties: None,
-                        required: vec![],
+                parameters: vec![
+                    Parameter {
+                        name: "file_id".to_string(),
+                        location: "path".to_string(),
+                        description: "File ID as decimal or hex (0x-prefixed).".to_string(),
+                        required: true,
+                        schema: Schema::ObjectSchema {
+                            schema_type: "string".to_string(),
+                            default: None,
+                            minimum: None,
+                            maximum: None,
+                            format: None,
+                            min_length: None,
+                            max_length: None,
+                            read_only: None,
+                            description: None,
+                            properties: None,
+                            required: vec![],
+                        },
                     },
-                }],
+                    Parameter {
+                        name: "format".to_string(),
+                        location: "query".to_string(),
+                        description: "Optional response format. Use json to request a JSON representation for file types that support export.".to_string(),
+                        required: false,
+                        schema: Schema::ObjectSchema {
+                            schema_type: "string".to_string(),
+                            default: None,
+                            minimum: None,
+                            maximum: None,
+                            format: None,
+                            min_length: None,
+                            max_length: None,
+                            read_only: None,
+                            description: None,
+                            properties: None,
+                            required: vec![],
+                        },
+                    },
+                ],
             }),
         },
     );
@@ -239,7 +261,8 @@ pub async fn files_index(ctx: RouteContext<()>) -> Result<Response> {
     let mut file_lines = Vec::new();
 
     for result in results.results::<crate::db::File>()? {
-        let json = serde_json::to_string(&result)?;
+        let response: crate::db::FileResponse = (&result).into();
+        let json = serde_json::to_string(&response)?;
         file_lines.push(json);
     }
 
@@ -259,7 +282,8 @@ pub async fn icons_index(ctx: RouteContext<()>) -> Result<Response> {
     let mut icon_lines = Vec::new();
 
     for result in results.results::<crate::db::File>()? {
-        let json = serde_json::to_string(&result)?;
+        let response: crate::db::FileResponse = (&result).into();
+        let json = serde_json::to_string(&response)?;
         icon_lines.push(json);
     }
 
@@ -268,7 +292,8 @@ pub async fn icons_index(ctx: RouteContext<()>) -> Result<Response> {
     Ok(with_cors_headers(response))
 }
 
-pub async fn files_get(ctx: RouteContext<()>) -> Result<Response> {
+pub async fn files_get(url: Url, ctx: RouteContext<()>) -> Result<Response> {
+    let query_params: HashMap<_, _> = url.query_pairs().into_owned().collect();
     let param_file_id = match ctx.param("file_id") {
         Some(val) => val,
         None => return Response::error("Must specify file ID.", 400),
@@ -290,6 +315,40 @@ pub async fn files_get(ctx: RouteContext<()>) -> Result<Response> {
     };
 
     let file_data = get_buf_for_file(&ctx, &file).await?;
+
+    if query_params.get("format").map(|value| value.as_str()) == Some("json") {
+        let file_type = file.resolved_file_type();
+        let json = match file_type {
+            DatFileType::CharGen | DatFileType::CharacterGenerator => {
+                let mut reader = Cursor::new(file_data.as_slice());
+                reader.set_position(4);
+                let chargen = CharGen::read(&mut reader).map_err(|err| {
+                    worker::Error::RustError(format!(
+                        "Failed to parse file {} (0x{:X}) as {}: {}",
+                        file_id, file_id, file_type, err
+                    ))
+                })?;
+                serde_json::to_string_pretty(&chargen).map_err(|err| {
+                    worker::Error::RustError(format!(
+                        "Failed to serialize file {} (0x{:X}) as JSON: {}",
+                        file_id, file_id, err
+                    ))
+                })?
+            }
+            _ => {
+                return Response::error(
+                    format!("JSON export is not supported for file type {}", file_type),
+                    400,
+                )
+            }
+        };
+
+        let mut response = Response::from_body(worker::ResponseBody::Body(json.into()))?;
+        response
+            .headers_mut()
+            .set("Content-Type", "application/json")?;
+        return Ok(with_cors_headers(response));
+    }
 
     let mut response = Response::from_bytes(file_data)?;
     response
@@ -329,7 +388,7 @@ pub async fn icons_get(url: Url, ctx: RouteContext<()>) -> Result<Response> {
     };
 
     // Error for unreasonable scale values
-    if param_scale < 1 || param_scale > 8 {
+    if !(1..=8).contains(&param_scale) {
         return Response::error("Choose a scale value between 1 and 8", 400);
     }
 
@@ -344,7 +403,7 @@ pub async fn icons_get(url: Url, ctx: RouteContext<()>) -> Result<Response> {
                 return Response::error(
                     format!(
                         "Failed to parse query parameter: underlay. Error: {}",
-                        err.to_string()
+                        err
                     ),
                     400,
                 )
@@ -361,7 +420,7 @@ pub async fn icons_get(url: Url, ctx: RouteContext<()>) -> Result<Response> {
                 return Response::error(
                     format!(
                         "Failed to parse query parameter: overlay. Error: {}",
-                        err.to_string()
+                        err
                     ),
                     400,
                 )

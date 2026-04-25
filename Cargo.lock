@@ -155,7 +155,7 @@ dependencies = [
 [[package]]
 name = "asheron-rs"
 version = "0.1.1"
-source = "git+https://github.com/amoeba/asheron-rs?rev=0e0c411c0cf88794ac3b1a8c01806f0d9755815d#0e0c411c0cf88794ac3b1a8c01806f0d9755815d"
+source = "git+https://github.com/amoeba/asheron-rs?rev=9e7d787959d8ad4890170fa36b973aa2c58b77f8#9e7d787959d8ad4890170fa36b973aa2c58b77f8"
 dependencies = [
  "anyhow",
  "bitflags",

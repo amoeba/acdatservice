@@ -1,5 +1,5 @@
 use acprotocol::dat::{
-    file_types::{dat_file::DatFile, texture::Texture, CharGen},
+    file_types::{dat_file::DatFile, texture::Texture, CharGen, SpellTable},
     DatFileSubtype, DatFileType, Icon,
 };
 use std::{collections::HashMap, fmt::Debug, io::Cursor};
@@ -329,6 +329,21 @@ pub async fn files_get(url: Url, ctx: RouteContext<()>) -> Result<Response> {
                     ))
                 })?;
                 serde_json::to_string_pretty(&chargen).map_err(|err| {
+                    worker::Error::RustError(format!(
+                        "Failed to serialize file {} (0x{:X}) as JSON: {}",
+                        file_id, file_id, err
+                    ))
+                })?
+            }
+            DatFileType::SpellTable => {
+                let mut reader = Cursor::new(file_data.as_slice());
+                let spell_table = SpellTable::read(&mut reader).map_err(|err| {
+                    worker::Error::RustError(format!(
+                        "Failed to parse file {} (0x{:X}) as {}: {}",
+                        file_id, file_id, file_type, err
+                    ))
+                })?;
+                serde_json::to_string_pretty(&spell_table).map_err(|err| {
                     worker::Error::RustError(format!(
                         "Failed to serialize file {} (0x{:X}) as JSON: {}",
                         file_id, file_id, err

@@ -314,7 +314,7 @@ pub async fn files_get(url: Url, ctx: RouteContext<()>) -> Result<Response> {
         }
     };
 
-    let file_data = get_buf_for_file(&ctx, &file).await?;
+    let (file_data, read_count) = get_buf_for_file(&ctx, &file).await?;
 
     if query_params.get("format").map(|value| value.as_str()) == Some("json") {
         let file_type = file.resolved_file_type();
@@ -362,6 +362,9 @@ pub async fn files_get(url: Url, ctx: RouteContext<()>) -> Result<Response> {
         response
             .headers_mut()
             .set("Content-Type", "application/json")?;
+        response
+            .headers_mut()
+            .set("X-R2-Read-Count", &read_count.to_string())?;
         return Ok(with_cors_headers(response));
     }
 
@@ -369,6 +372,9 @@ pub async fn files_get(url: Url, ctx: RouteContext<()>) -> Result<Response> {
     response
         .headers_mut()
         .set("Content-Type", "application/octet-stream")?;
+    response
+        .headers_mut()
+        .set("X-R2-Read-Count", &read_count.to_string())?;
 
     Ok(with_cors_headers(response))
 }
@@ -441,11 +447,11 @@ pub async fn icons_get(url: Url, ctx: RouteContext<()>) -> Result<Response> {
     // ui_effect - accepts ID or UiEffects name
     let param_ui_effect = query_params.get("ui_effect").cloned();
 
-    // Helper to load texture by ID
+    // Helper to load texture by ID; returns the texture and the number of R2 reads performed.
     async fn load_texture_by_id(
         ctx: &RouteContext<()>,
         texture_id: u32,
-    ) -> std::result::Result<Texture, Response> {
+    ) -> std::result::Result<(Texture, usize), Response> {
         let texture_file = match get_file_by_id(ctx, texture_id as i32).await {
             Ok(Some(file)) => file,
             _ => {
@@ -461,7 +467,7 @@ pub async fn icons_get(url: Url, ctx: RouteContext<()>) -> Result<Response> {
             }
         };
 
-        let texture_object: Vec<u8> = match get_buf_for_file(ctx, &texture_file).await {
+        let (texture_object, read_count) = match get_buf_for_file(ctx, &texture_file).await {
             Ok(data) => data,
             Err(_) => {
                 return Err(
@@ -487,8 +493,10 @@ pub async fn icons_get(url: Url, ctx: RouteContext<()>) -> Result<Response> {
                 )
             }
         };
-        Ok(texture_file.inner)
+        Ok((texture_file.inner, read_count))
     }
+
+    let mut total_read_count: usize = 0;
 
     // Load background texture - can be ID or ItemType name
     let maybe_background = if let Some(bg_str) = param_background {
@@ -505,7 +513,10 @@ pub async fn icons_get(url: Url, ctx: RouteContext<()>) -> Result<Response> {
             }
         };
         match load_texture_by_id(&ctx, bg_texture_id).await {
-            Ok(texture) => Some(texture),
+            Ok((texture, count)) => {
+                total_read_count += count;
+                Some(texture)
+            }
             Err(response) => return Ok(response),
         }
     } else {
@@ -515,7 +526,10 @@ pub async fn icons_get(url: Url, ctx: RouteContext<()>) -> Result<Response> {
     // Load underlay if specified (ID only)
     let maybe_underlay = if let Some(underlay_id) = param_underlay {
         match load_texture_by_id(&ctx, underlay_id as u32).await {
-            Ok(texture) => Some(texture),
+            Ok((texture, count)) => {
+                total_read_count += count;
+                Some(texture)
+            }
             Err(response) => return Ok(response),
         }
     } else {
@@ -525,7 +539,10 @@ pub async fn icons_get(url: Url, ctx: RouteContext<()>) -> Result<Response> {
     // Load overlay if specified (ID only)
     let maybe_overlay = if let Some(overlay_id) = param_overlay {
         match load_texture_by_id(&ctx, overlay_id as u32).await {
-            Ok(texture) => Some(texture),
+            Ok((texture, count)) => {
+                total_read_count += count;
+                Some(texture)
+            }
             Err(response) => return Ok(response),
         }
     } else {
@@ -547,13 +564,19 @@ pub async fn icons_get(url: Url, ctx: RouteContext<()>) -> Result<Response> {
             }
         };
         match load_texture_by_id(&ctx, effect_texture_id).await {
-            Ok(texture) => texture,
+            Ok((texture, count)) => {
+                total_read_count += count;
+                texture
+            }
             Err(response) => return Ok(response),
         }
     } else {
         // Default effect (transparent)
         match load_texture_by_id(&ctx, 0x060011C5).await {
-            Ok(texture) => texture,
+            Ok((texture, count)) => {
+                total_read_count += count;
+                texture
+            }
             Err(response) => return Ok(response),
         }
     };
@@ -570,7 +593,8 @@ pub async fn icons_get(url: Url, ctx: RouteContext<()>) -> Result<Response> {
     };
 
     // Create icon
-    let base_object = get_buf_for_file(&ctx, &base_file).await?;
+    let (base_object, base_count) = get_buf_for_file(&ctx, &base_file).await?;
+    total_read_count += base_count;
     let mut buf_reader = Cursor::new(base_object);
     let outer_file: DatFile<Texture> = DatFile::read(&mut buf_reader)?;
     let icon_texture = outer_file.inner;
@@ -587,6 +611,9 @@ pub async fn icons_get(url: Url, ctx: RouteContext<()>) -> Result<Response> {
     };
 
     // Generate the image or error
-    let response = generate_icon(&icon).await?;
+    let mut response = generate_icon(&icon).await?;
+    response
+        .headers_mut()
+        .set("X-R2-Read-Count", &total_read_count.to_string())?;
     Ok(with_cors_headers(response))
 }

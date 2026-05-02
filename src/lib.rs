@@ -4,10 +4,12 @@ use std::io::Cursor;
 use acprotocol::dat::reader::{
     dat_file_reader::DatFileReader, worker_r2_reader::WorkerR2RangeReader,
 };
+use counting_reader::CountingRangeReader;
 use byteorder::{BigEndian, ReadBytesExt};
 use routes::{files_get, files_index, icons_get, icons_index, index_get};
 use worker::*;
 
+mod counting_reader;
 mod db;
 mod generators;
 mod lib_test;
@@ -22,6 +24,9 @@ fn with_cors_headers(mut response: Response) -> Response {
         .ok();
     headers
         .set("Access-Control-Allow-Headers", "Content-Type")
+        .ok();
+    headers
+        .set("Access-Control-Expose-Headers", "X-R2-Read-Count")
         .ok();
     response
 }
@@ -61,17 +66,18 @@ async fn fetch(req: Request, env: Env, _ctx: Context) -> Result<Response> {
 pub async fn get_buf_for_file(
     ctx: &RouteContext<()>,
     file: &db::File,
-) -> std::result::Result<Vec<u8>, worker::Error> {
+) -> std::result::Result<(Vec<u8>, usize), worker::Error> {
     let bucket = ctx.bucket("DATS_BUCKET")?;
-    let mut worker_reader = WorkerR2RangeReader::new(bucket, "client_portal.dat".to_string());
+    let worker_reader = WorkerR2RangeReader::new(bucket, "client_portal.dat".to_string());
+    let mut counting_reader = CountingRangeReader::new(worker_reader);
     let mut reader = DatFileReader::new(file.file_size as usize, 1024_usize)
         .map_err(|e| worker::Error::RustError(format!("Failed to create reader: {}", e)))?;
     let buf = reader
-        .read_file(&mut worker_reader, file.file_offset as u32)
+        .read_file(&mut counting_reader, file.file_offset as u32)
         .await
         .map_err(|e| worker::Error::RustError(format!("Failed to read_file: {}", e)))?;
 
-    Ok(buf)
+    Ok((buf, counting_reader.count))
 }
 
 pub async fn get_file_by_id(ctx: &RouteContext<()>, file_id: i32) -> Result<Option<db::File>> {

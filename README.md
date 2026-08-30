@@ -28,8 +28,7 @@ To update the index on D1, run
 
 ```sh
 # Index each DAT you want to serve. The database_type is inferred from the filename.
-cargo run --bin create_index --features=index -- client_portal.dat
-cargo run --bin create_index --features=index -- client_cell.dat
+cargo run --bin create_index --features=index -- client_portal.dat client_cell_1.dat
 # this creates data/index.sqlite
 sh scripts/sync_d1.sh
 # this dumps the database we just created, converts it to .sql, and executes

@@ -66,20 +66,32 @@ async fn fetch(req: Request, env: Env, _ctx: Context) -> Result<Response> {
 
 /// Parse the :dat path parameter into a database type and the corresponding R2 object key.
 /// Accepts short names ("portal", "cell") and full filenames ("client_portal.dat",
-/// "client_cell.dat").
+/// "client_cell.dat", "client_cell_1.dat", etc.).
 pub fn parse_dat_param(
     text: &str,
 ) -> std::result::Result<(DatDatabaseType, String), Box<dyn Error>> {
     let normalized = text.to_ascii_lowercase();
-    let db_type = if normalized == "portal" || normalized == "client_portal.dat" {
-        DatDatabaseType::Portal
-    } else if normalized == "cell" || normalized == "client_cell.dat" {
-        DatDatabaseType::Cell
+
+    // If the parameter already looks like a filename, use it directly as the R2 key.
+    if normalized.ends_with(".dat") {
+        let db_type = if normalized.contains("cell") {
+            DatDatabaseType::Cell
+        } else {
+            DatDatabaseType::Portal
+        };
+        return Ok((db_type, normalized));
+    }
+
+    // Otherwise treat it as a short name and map to the actual R2 object key.
+    let (db_type, object_key) = if normalized == "portal" {
+        (DatDatabaseType::Portal, "client_portal.dat".to_string())
+    } else if normalized == "cell" {
+        // The live cell DAT is named client_cell_1.dat in both R2 and the ACE repo.
+        (DatDatabaseType::Cell, "client_cell_1.dat".to_string())
     } else {
         return Err(format!("Invalid dat name: {}. Expected portal or cell.", text).into());
     };
 
-    let object_key = format!("client_{}.dat", db_type.to_string().to_ascii_lowercase());
     Ok((db_type, object_key))
 }
 

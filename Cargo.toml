@@ -63,5 +63,5 @@ tokio = { version = "1", features = ["rt", "macros"] }
 
 [features]
 default = []
-dropshot = ["dep:dropshot", "dep:tokio"]
+dropshot = ["dep:dropshot", "dep:tokio", "dep:sqlite"]
 index = ["dep:sqlite", "dep:strum", "dep:sha2"]

@@ -64,29 +64,39 @@ struct FilesResponse {
     files: Vec<FileEntry>,
 }
 
-fn list_files() -> Result<Vec<FileEntry>, Box<dyn std::error::Error>> {
-    let db_path = "./data/index.sqlite";
-    let connection = sqlite::open(db_path)?;
-    let mut statement =
-        connection.prepare("SELECT id, type, subtype, offset FROM files LIMIT 1024;")?;
+fn list_files_from_connection(
+    connection: &sqlite::Connection,
+) -> Result<Vec<FileEntry>, Box<dyn std::error::Error>> {
+    let mut statement = connection.prepare(
+        "SELECT files.id,
+                COALESCE(file_types.name, printf('Unknown(%d)', files.file_type)),
+                COALESCE(file_subtypes.name, 'None'),
+                files.file_offset
+         FROM files
+         LEFT JOIN file_types ON file_types.id = files.file_type
+         LEFT JOIN file_subtypes
+           ON file_subtypes.id = files.file_subtype
+          AND file_subtypes.file_type_id = files.file_type
+         ORDER BY files.id ASC
+         LIMIT 1024",
+    )?;
 
-    let mut files: Vec<FileEntry> = Vec::new();
-
+    let mut files = Vec::new();
     while let sqlite::State::Row = statement.next()? {
-        let id: i64 = statement.read(0)?;
-        let file_type: String = statement.read(1)?;
-        let file_subtype: String = statement.read(2)?;
-        let offset: i64 = statement.read(3)?;
-
         files.push(FileEntry {
-            id,
-            file_type,
-            subtype: file_subtype,
-            offset,
+            id: statement.read(0)?,
+            file_type: statement.read(1)?,
+            subtype: statement.read(2)?,
+            offset: statement.read(3)?,
         });
     }
 
     Ok(files)
+}
+
+fn list_files() -> Result<Vec<FileEntry>, Box<dyn std::error::Error>> {
+    let connection = sqlite::open("./data/index.sqlite")?;
+    list_files_from_connection(&connection)
 }
 
 #[endpoint(
@@ -196,4 +206,48 @@ async fn main() -> Result<(), String> {
         .map_err(|error| format!("failed to start server: {}", error))?;
 
     server.await.map_err(|e| e.to_string())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn list_files_uses_the_current_index_schema() {
+        let connection = sqlite::open(":memory:").unwrap();
+        connection
+            .execute(
+                "CREATE TABLE files (
+                    id INTEGER NOT NULL,
+                    database_type INTEGER NOT NULL,
+                    file_type INTEGER NOT NULL,
+                    file_subtype INTEGER,
+                    file_offset INTEGER NOT NULL,
+                    file_size INTEGER NOT NULL
+                 );
+                 CREATE TABLE file_types (id INTEGER NOT NULL, name TEXT NOT NULL);
+                 CREATE TABLE file_subtypes (
+                    id INTEGER NOT NULL,
+                    file_type_id INTEGER,
+                    name TEXT NOT NULL
+                 );
+                 INSERT INTO file_types VALUES (12, 'Texture');
+                 INSERT INTO file_subtypes VALUES (0, 12, 'Icon');
+                 INSERT INTO files VALUES (2, 0, 12, 0, 200, 10);
+                 INSERT INTO files VALUES (1, 0, 999, NULL, 100, 10);",
+            )
+            .unwrap();
+
+        let files = list_files_from_connection(&connection).unwrap();
+
+        assert_eq!(files.len(), 2);
+        assert_eq!(files[0].id, 1);
+        assert_eq!(files[0].file_type, "Unknown(999)");
+        assert_eq!(files[0].subtype, "None");
+        assert_eq!(files[0].offset, 100);
+        assert_eq!(files[1].id, 2);
+        assert_eq!(files[1].file_type, "Texture");
+        assert_eq!(files[1].subtype, "Icon");
+        assert_eq!(files[1].offset, 200);
+    }
 }

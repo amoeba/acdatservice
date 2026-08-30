@@ -75,6 +75,17 @@ fn migrate(connection: &Connection) -> Result<(), Box<dyn std::error::Error>> {
         )",
     )?;
 
+    // Match the Worker queries for single-file lookups, deterministic DAT listings,
+    // and portal icon listings.
+    connection.execute(
+        "CREATE INDEX IF NOT EXISTS idx_files_database_type_id
+         ON files (database_type, id)",
+    )?;
+    connection.execute(
+        "CREATE INDEX IF NOT EXISTS idx_files_database_type_subtype_id
+         ON files (database_type, file_subtype, id)",
+    )?;
+
     Ok(())
 }
 
@@ -300,11 +311,42 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     for dat_path in dat_paths {
         let database_type = dat_type_from_path(dat_path);
-        record_dat_metadata(&connection, dat_path, database_type.clone())?;
+        record_dat_metadata(&connection, dat_path, database_type)?;
         create_index(&connection, dat_path, database_type)?;
     }
 
     show_data(&connection)?;
 
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn migration_creates_indexes_for_worker_file_queries() {
+        let connection = sqlite::open(":memory:").unwrap();
+        migrate(&connection).unwrap();
+
+        let mut statement = connection
+            .prepare(
+                "SELECT name FROM sqlite_master
+                 WHERE type = 'index' AND tbl_name = 'files'
+                 ORDER BY name",
+            )
+            .unwrap();
+        let mut indexes = Vec::new();
+        while let sqlite::State::Row = statement.next().unwrap() {
+            indexes.push(statement.read::<String, _>(0).unwrap());
+        }
+
+        assert_eq!(
+            indexes,
+            vec![
+                "idx_files_database_type_id",
+                "idx_files_database_type_subtype_id",
+            ]
+        );
+    }
 }

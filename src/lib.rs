@@ -1,12 +1,9 @@
-use std::error::Error;
-use std::io::Cursor;
-
 use acprotocol::dat::reader::{
     dat_file_reader::DatFileReader, worker_r2_reader::WorkerR2RangeReader,
 };
-use byteorder::{BigEndian, ReadBytesExt};
 use counting_reader::CountingRangeReader;
 use routes::{dats_index, files_get, files_index, icons_get, icons_index, index_get};
+use std::error::Error;
 use worker::*;
 
 mod counting_reader;
@@ -80,7 +77,10 @@ fn with_cors_headers(mut response: Response) -> Response {
         .set("Access-Control-Allow-Headers", "Content-Type")
         .ok();
     headers
-        .set("Access-Control-Expose-Headers", "X-R2-Read-Count")
+        .set(
+            "Access-Control-Expose-Headers",
+            "X-Limit, X-Offset, X-R2-Read-Count",
+        )
         .ok();
     response
 }
@@ -188,43 +188,54 @@ pub async fn get_file_by_id(
 /// Unlike parse_decimal_or_hex_string, this does not apply any icon-specific offsets.
 pub fn parse_file_id(text: &str) -> std::result::Result<u32, Box<dyn Error>> {
     if let Some(hex_str) = text.strip_prefix("0x").or_else(|| text.strip_prefix("0X")) {
-        u32::from_str_radix(hex_str, 16).map_err(|e| e.into())
+        u32::from_str_radix(hex_str, 16).map_err(|_| {
+            format!(
+                "Invalid file ID {:?}. Use a decimal ID or a hexadecimal ID such as 0x1000001.",
+                text
+            )
+            .into()
+        })
     } else {
-        text.parse::<u32>().map_err(|e| e.into())
+        text.parse::<u32>().map_err(|_| {
+            format!(
+                "Invalid file ID {:?}. Use an unsigned decimal ID or hexadecimal ID such as 0x1000001.",
+                text
+            )
+            .into()
+        })
     }
 }
 
+/// Parse an icon or texture ID as either a decimal value or a 4-/8-digit hexadecimal value.
+/// Four-digit values are relative to the icon ID range; eight-digit values are absolute.
 fn parse_decimal_or_hex_string(text: &str) -> std::result::Result<i32, Box<dyn Error>> {
-    if text.starts_with("0x") {
-        let text = &text.replace("0x", "");
-        let bytes = byteutils::hex_to_bytes(text)?;
-        let mut reader: Cursor<&Vec<u8>> = Cursor::new(&bytes);
+    const EXAMPLE: &str =
+        "Use decimal (26967), relative hexadecimal (0x6957), or absolute hexadecimal (0x06006957).";
 
-        let result = match text.len() {
-            4 => reader.read_i16::<BigEndian>()? as i32 + 0x6000000,
-            8 => reader.read_i32::<BigEndian>()?,
+    if let Some(hex_str) = text.strip_prefix("0x").or_else(|| text.strip_prefix("0X")) {
+        let result = match hex_str.len() {
+            4 => u16::from_str_radix(hex_str, 16).map(|value| value as i16 as i32 + 0x6000000),
+            8 => u32::from_str_radix(hex_str, 16).map(|value| value as i32),
             _ => {
-                return Err(
-                    "Invalid length. Should either by 4 (0x1234) or 8 (0x12345678) hex digits."
-                        .into(),
-                )
+                return Err(format!(
+                "Invalid hexadecimal ID {:?}. Use exactly 4 or 8 hexadecimal digits after 0x. {}",
+                text, EXAMPLE
+            )
+                .into())
             }
         };
 
-        Ok(result)
-    } else {
-        // Decimal path
-        let parse_result = text.parse::<i32>();
+        return result
+            .map_err(|_| format!("Invalid hexadecimal ID {:?}. {}", text, EXAMPLE).into());
+    }
 
-        match parse_result {
-            Ok(value) => {
-                if value < 0x6000000 {
-                    Ok(value + 0x6000000)
-                } else {
-                    Ok(value)
-                }
-            }
-            Err(err) => Err(Box::new(err)),
-        }
+    let value = text.parse::<i32>().map_err(|_| -> Box<dyn Error> {
+        format!("Invalid decimal ID {:?}. {}", text, EXAMPLE).into()
+    })?;
+
+    if value < 0x6000000 {
+        Ok(value + 0x6000000)
+    } else {
+        Ok(value)
     }
 }

@@ -24,6 +24,25 @@ struct DebugResponse {
     ui_effect: Option<String>,
 }
 
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub(crate) enum FileResponseFormat {
+    Binary,
+    Json,
+}
+
+pub(crate) fn parse_file_response_format(
+    value: Option<&str>,
+) -> std::result::Result<FileResponseFormat, String> {
+    match value {
+        None => Ok(FileResponseFormat::Binary),
+        Some("json") => Ok(FileResponseFormat::Json),
+        Some(value) => Err(format!(
+            "Unsupported format {:?}. Omit format for binary data or use format=json for supported file types.",
+            value
+        )),
+    }
+}
+
 #[derive(serde::Deserialize)]
 struct FileCountRow {
     database_type: i64,
@@ -72,8 +91,8 @@ pub async fn index_get(_ctx: RouteContext<()>) -> Result<Response> {
         "/dats/{dat}/files".to_string(),
         PathItem {
             get: Some(Operation {
-                summary: "List file IDs for a DAT".to_string(),
-                description: "Returns a newline-separated list of file IDs in the requested DAT. Use 'portal' or 'cell' for the dat parameter. Results are paginated; use ?limit and ?offset to page through large DATs.".to_string(),
+                summary: "List file metadata for a DAT".to_string(),
+                description: "Returns JSON Lines file metadata for the requested DAT. Use 'portal', 'cell', 'highres', or 'local_english' for the dat parameter. Results are ordered by file ID and paginated; use ?limit and ?offset to page through large DATs.".to_string(),
                 operation_id: "files_index".to_string(),
                 parameters: vec![
                     Parameter {
@@ -142,7 +161,7 @@ pub async fn index_get(_ctx: RouteContext<()>) -> Result<Response> {
         PathItem {
             get: Some(Operation {
                 summary: "Get a file by ID from a DAT".to_string(),
-                description: "Returns the raw binary content of a DAT file by its ID. The file_id can be specified as a decimal number (e.g., 16777217) or as a hex string with 0x prefix (e.g., 0x1000001). Add ?format=json to request a JSON representation for file types that support it.".to_string(),
+                description: "Returns the raw binary content of a DAT file by its ID. The file_id can be specified as a decimal number (e.g., 16777217) or as a hex string with a 0x or 0X prefix (e.g., 0x1000001). Add ?format=json to request a JSON representation for file types that support it.".to_string(),
                 operation_id: "files_get".to_string(),
                 parameters: vec![
                     Parameter {
@@ -167,7 +186,7 @@ pub async fn index_get(_ctx: RouteContext<()>) -> Result<Response> {
                     Parameter {
                         name: "file_id".to_string(),
                         location: "path".to_string(),
-                        description: "File ID as decimal or hex (0x-prefixed).".to_string(),
+                        description: "File ID as decimal or hex (0x- or 0X-prefixed).".to_string(),
                         required: true,
                         schema: Schema::ObjectSchema {
                             schema_type: "string".to_string(),
@@ -210,15 +229,16 @@ pub async fn index_get(_ctx: RouteContext<()>) -> Result<Response> {
         "/icons".to_string(),
         PathItem {
             get: Some(Operation {
-                summary: "List all icon IDs".to_string(),
-                description: "Returns a newline-separated list of all icon IDs in the database (files with Icon subtype).".to_string(),
+                summary: "List icon metadata".to_string(),
+                description: "Returns JSON Lines file metadata for all icon files in the database."
+                    .to_string(),
                 operation_id: "icons_index".to_string(),
                 parameters: vec![],
             }),
         },
     );
     paths.insert(
-        "/icons/:icon_id".to_string(),
+        "/icons/{id}".to_string(),
         PathItem {
             get: Some(Operation {
                 summary: "Get an icon".to_string(),
@@ -491,7 +511,8 @@ pub async fn files_index(url: Url, ctx: RouteContext<()>) -> Result<Response> {
     };
 
     let db = ctx.d1("DATS_DB")?;
-    let statement = db.prepare("SELECT * FROM files WHERE database_type = ?1 LIMIT ?2 OFFSET ?3");
+    let statement = db
+        .prepare("SELECT * FROM files WHERE database_type = ?1 ORDER BY id ASC LIMIT ?2 OFFSET ?3");
     // We cast to f64 to apparently work around JS
     let database_type_value = database_type.as_u32() as f64;
     let limit_value = limit as f64;
@@ -513,6 +534,9 @@ pub async fn files_index(url: Url, ctx: RouteContext<()>) -> Result<Response> {
 
     let response_text = file_lines.join("\n");
     let mut response = Response::ok(response_text)?;
+    response
+        .headers_mut()
+        .set("Content-Type", "application/x-ndjson; charset=utf-8")?;
     response.headers_mut().set("X-Limit", &limit.to_string())?;
     response
         .headers_mut()
@@ -522,8 +546,9 @@ pub async fn files_index(url: Url, ctx: RouteContext<()>) -> Result<Response> {
 
 pub async fn icons_index(ctx: RouteContext<()>) -> Result<Response> {
     let db = ctx.d1("DATS_DB")?;
-    let statement =
-        db.prepare("SELECT * FROM files WHERE database_type = ?1 AND file_subtype = ?2");
+    let statement = db.prepare(
+        "SELECT * FROM files WHERE database_type = ?1 AND file_subtype = ?2 ORDER BY id ASC",
+    );
     // We cast to f64 to apparently work around JS
     let database_type = DatDatabaseType::Portal.as_u32() as f64;
     let icon_subtype = DatFileSubtype::Icon.as_u32() as f64;
@@ -539,7 +564,10 @@ pub async fn icons_index(ctx: RouteContext<()>) -> Result<Response> {
     }
 
     let response_text = icon_lines.join("\n");
-    let response = Response::ok(response_text)?;
+    let mut response = Response::ok(response_text)?;
+    response
+        .headers_mut()
+        .set("Content-Type", "application/x-ndjson; charset=utf-8")?;
     Ok(with_cors_headers(response))
 }
 
@@ -562,8 +590,14 @@ pub async fn files_get(url: Url, ctx: RouteContext<()>) -> Result<Response> {
 
     let file_id = match parse_file_id(param_file_id) {
         Ok(val) => val,
-        Err(err) => return Response::error(format!("Invalid file ID: {}", err), 400),
+        Err(err) => return Response::error(err.to_string(), 400),
     };
+
+    let response_format =
+        match parse_file_response_format(query_params.get("format").map(String::as_str)) {
+            Ok(value) => value,
+            Err(message) => return Response::error(message, 400),
+        };
 
     let file = match get_file_by_id(&ctx, database_type, file_id).await? {
         Some(val) => val,
@@ -577,7 +611,7 @@ pub async fn files_get(url: Url, ctx: RouteContext<()>) -> Result<Response> {
 
     let (file_data, read_count) = get_buf_for_file(&ctx, database_type, &file).await?;
 
-    if query_params.get("format").map(|value| value.as_str()) == Some("json") {
+    if response_format == FileResponseFormat::Json {
         let file_type = file.resolved_file_type();
         let json = match file_type {
             DatFileType::CharGen | DatFileType::CharacterGenerator => {
@@ -713,9 +747,7 @@ pub async fn icons_get(url: Url, ctx: RouteContext<()>) -> Result<Response> {
         ctx: &RouteContext<()>,
         texture_id: u32,
     ) -> std::result::Result<(Texture, usize), Response> {
-        let texture_file = match get_file_by_id(ctx, DatDatabaseType::Portal, texture_id as u32)
-            .await
-        {
+        let texture_file = match get_file_by_id(ctx, DatDatabaseType::Portal, texture_id).await {
             Ok(Some(file)) => file,
             _ => {
                 return Err(

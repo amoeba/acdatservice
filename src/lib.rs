@@ -1,11 +1,12 @@
 use std::error::Error;
 use std::io::Cursor;
 
-use acprotocol::dat::reader::{
-    dat_file_reader::DatFileReader, worker_r2_reader::WorkerR2RangeReader,
+use acprotocol::dat::{
+    reader::{dat_file_reader::DatFileReader, worker_r2_reader::WorkerR2RangeReader},
+    DatDatabaseType,
 };
-use counting_reader::CountingRangeReader;
 use byteorder::{BigEndian, ReadBytesExt};
+use counting_reader::CountingRangeReader;
 use routes::{files_get, files_index, icons_get, icons_index, index_get};
 use worker::*;
 
@@ -48,8 +49,8 @@ async fn fetch(req: Request, env: Env, _ctx: Context) -> Result<Response> {
     let icons_url = url_string.clone();
     let response = router
         .get_async("/", |_, ctx| index_get(ctx))
-        .get_async("/files", |_, ctx| files_index(ctx))
-        .get_async("/files/:file_id", move |_, ctx| {
+        .get_async("/dats/:dat/files", move |_, ctx| files_index(ctx))
+        .get_async("/dats/:dat/files/:file_id", move |_, ctx| {
             files_get(files_url.clone(), ctx)
         })
         .get_async("/icons", |_, ctx| icons_index(ctx))
@@ -63,12 +64,32 @@ async fn fetch(req: Request, env: Env, _ctx: Context) -> Result<Response> {
     Ok(with_cors_headers(response))
 }
 
+/// Parse the :dat path parameter into a database type and the corresponding R2 object key.
+/// Accepts short names ("portal", "cell") and full filenames ("client_portal.dat",
+/// "client_cell.dat").
+pub fn parse_dat_param(
+    text: &str,
+) -> std::result::Result<(DatDatabaseType, String), Box<dyn Error>> {
+    let normalized = text.to_ascii_lowercase();
+    let db_type = if normalized == "portal" || normalized == "client_portal.dat" {
+        DatDatabaseType::Portal
+    } else if normalized == "cell" || normalized == "client_cell.dat" {
+        DatDatabaseType::Cell
+    } else {
+        return Err(format!("Invalid dat name: {}. Expected portal or cell.", text).into());
+    };
+
+    let object_key = format!("client_{}.dat", db_type.to_string().to_ascii_lowercase());
+    Ok((db_type, object_key))
+}
+
 pub async fn get_buf_for_file(
     ctx: &RouteContext<()>,
+    dat_object: &str,
     file: &db::File,
 ) -> std::result::Result<(Vec<u8>, usize), worker::Error> {
     let bucket = ctx.bucket("DATS_BUCKET")?;
-    let worker_reader = WorkerR2RangeReader::new(bucket, "client_portal.dat".to_string());
+    let worker_reader = WorkerR2RangeReader::new(bucket, dat_object.to_string());
     let mut counting_reader = CountingRangeReader::new(worker_reader);
     let mut reader = DatFileReader::new(file.file_size as usize, 1024_usize)
         .map_err(|e| worker::Error::RustError(format!("Failed to create reader: {}", e)))?;
@@ -80,10 +101,16 @@ pub async fn get_buf_for_file(
     Ok((buf, counting_reader.count))
 }
 
-pub async fn get_file_by_id(ctx: &RouteContext<()>, file_id: i32) -> Result<Option<db::File>> {
+pub async fn get_file_by_id(
+    ctx: &RouteContext<()>,
+    database_type: DatDatabaseType,
+    file_id: i32,
+) -> Result<Option<db::File>> {
     let db = ctx.d1("DATS_DB")?;
-    let statement = db.prepare("SELECT * FROM files WHERE id = ?1 LIMIT 1");
-    let query = statement.bind(&[file_id.into()])?;
+    let statement = db.prepare("SELECT * FROM files WHERE id = ?1 AND database_type = ?2 LIMIT 1");
+    // We cast to f64 to apparently work around JS
+    let database_type_value = database_type.as_u32() as f64;
+    let query = statement.bind(&[file_id.into(), database_type_value.into()])?;
 
     query.first::<crate::db::File>(None).await
 }

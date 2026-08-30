@@ -33,7 +33,8 @@ mod tests {
             &mut self,
             _offset: u32,
             length: usize,
-        ) -> impl std::future::Future<Output = Result<Vec<u8>, Box<dyn std::error::Error>>> {
+        ) -> impl std::future::Future<Output = Result<Vec<u8>, Box<dyn std::error::Error>>>
+        {
             async move { Ok(vec![0u8; length]) }
         }
     }

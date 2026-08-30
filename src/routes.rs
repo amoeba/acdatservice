@@ -1,6 +1,6 @@
 use acprotocol::dat::{
     file_types::{dat_file::DatFile, texture::Texture, CharGen, SpellTable},
-    DatFileSubtype, DatFileType, Icon,
+    DatDatabaseType, DatFileSubtype, DatFileType, Icon,
 };
 use std::{collections::HashMap, fmt::Debug, io::Cursor};
 use worker::*;
@@ -9,7 +9,7 @@ use crate::{
     generators::icon::generate_icon,
     get_buf_for_file, get_file_by_id,
     openapi::{Contact, Info, OpenApiDocument, Operation, Parameter, PathItem, Schema, Server},
-    parse_decimal_or_hex_string, parse_file_id, with_cors_headers,
+    parse_dat_param, parse_decimal_or_hex_string, parse_file_id, with_cors_headers,
 };
 
 #[allow(dead_code)]
@@ -26,25 +26,63 @@ struct DebugResponse {
 pub async fn index_get(_ctx: RouteContext<()>) -> Result<Response> {
     let mut paths = HashMap::new();
     paths.insert(
-        "/files".to_string(),
+        "/dats/{dat}/files".to_string(),
         PathItem {
             get: Some(Operation {
-                summary: "List all file IDs".to_string(),
-                description: "Returns a newline-separated list of all file IDs in the database."
-                    .to_string(),
+                summary: "List all file IDs for a DAT".to_string(),
+                description: "Returns a newline-separated list of all file IDs in the requested DAT. Use 'portal' or 'cell' for the dat parameter.".to_string(),
                 operation_id: "files_index".to_string(),
-                parameters: vec![],
+                parameters: vec![
+                    Parameter {
+                        name: "dat".to_string(),
+                        location: "path".to_string(),
+                        description: "DAT name. Use 'portal' or 'cell'.".to_string(),
+                        required: true,
+                        schema: Schema::ObjectSchema {
+                            schema_type: "string".to_string(),
+                            default: None,
+                            minimum: None,
+                            maximum: None,
+                            format: None,
+                            min_length: None,
+                            max_length: None,
+                            read_only: None,
+                            description: None,
+                            properties: None,
+                            required: vec![],
+                        },
+                    },
+                ],
             }),
         },
     );
     paths.insert(
-        "/files/:file_id".to_string(),
+        "/dats/{dat}/files/{file_id}".to_string(),
         PathItem {
             get: Some(Operation {
-                summary: "Get a file by ID".to_string(),
+                summary: "Get a file by ID from a DAT".to_string(),
                 description: "Returns the raw binary content of a DAT file by its ID. The file_id can be specified as a decimal number (e.g., 16777217) or as a hex string with 0x prefix (e.g., 0x1000001). Add ?format=json to request a JSON representation for file types that support it.".to_string(),
                 operation_id: "files_get".to_string(),
                 parameters: vec![
+                    Parameter {
+                        name: "dat".to_string(),
+                        location: "path".to_string(),
+                        description: "DAT name. Use 'portal' or 'cell'.".to_string(),
+                        required: true,
+                        schema: Schema::ObjectSchema {
+                            schema_type: "string".to_string(),
+                            default: None,
+                            minimum: None,
+                            maximum: None,
+                            format: None,
+                            min_length: None,
+                            max_length: None,
+                            read_only: None,
+                            description: None,
+                            properties: None,
+                            required: vec![],
+                        },
+                    },
                     Parameter {
                         name: "file_id".to_string(),
                         location: "path".to_string(),
@@ -253,9 +291,21 @@ pub async fn index_get(_ctx: RouteContext<()>) -> Result<Response> {
 }
 
 pub async fn files_index(ctx: RouteContext<()>) -> Result<Response> {
+    let param_dat = match ctx.param("dat") {
+        Some(val) => val,
+        None => return Response::error("Must specify DAT name.", 400),
+    };
+
+    let (database_type, _) = match parse_dat_param(param_dat) {
+        Ok(val) => val,
+        Err(err) => return Response::error(err.to_string(), 400),
+    };
+
     let db = ctx.d1("DATS_DB")?;
-    let statement = db.prepare("SELECT * FROM files");
-    let query = statement.bind(&[])?;
+    let statement = db.prepare("SELECT * FROM files WHERE database_type = ?1");
+    // We cast to f64 to apparently work around JS
+    let database_type_value = database_type.as_u32() as f64;
+    let query = statement.bind(&[database_type_value.into()])?;
 
     let results = query.all().await?;
     let mut file_lines = Vec::new();
@@ -273,10 +323,12 @@ pub async fn files_index(ctx: RouteContext<()>) -> Result<Response> {
 
 pub async fn icons_index(ctx: RouteContext<()>) -> Result<Response> {
     let db = ctx.d1("DATS_DB")?;
-    let statement = db.prepare("SELECT * FROM files WHERE file_subtype = ?1");
+    let statement =
+        db.prepare("SELECT * FROM files WHERE database_type = ?1 AND file_subtype = ?2");
     // We cast to f64 to apparently work around JS
+    let database_type = DatDatabaseType::Portal.as_u32() as f64;
     let icon_subtype = DatFileSubtype::Icon.as_u32() as f64;
-    let query = statement.bind(&[icon_subtype.into()])?;
+    let query = statement.bind(&[database_type.into(), icon_subtype.into()])?;
 
     let results = query.all().await?;
     let mut icon_lines = Vec::new();
@@ -294,6 +346,16 @@ pub async fn icons_index(ctx: RouteContext<()>) -> Result<Response> {
 
 pub async fn files_get(url: Url, ctx: RouteContext<()>) -> Result<Response> {
     let query_params: HashMap<_, _> = url.query_pairs().into_owned().collect();
+    let param_dat = match ctx.param("dat") {
+        Some(val) => val,
+        None => return Response::error("Must specify DAT name.", 400),
+    };
+
+    let (database_type, dat_object) = match parse_dat_param(param_dat) {
+        Ok(val) => val,
+        Err(err) => return Response::error(err.to_string(), 400),
+    };
+
     let param_file_id = match ctx.param("file_id") {
         Some(val) => val,
         None => return Response::error("Must specify file ID.", 400),
@@ -304,7 +366,7 @@ pub async fn files_get(url: Url, ctx: RouteContext<()>) -> Result<Response> {
         Err(err) => return Response::error(format!("Invalid file ID: {}", err), 400),
     };
 
-    let file = match get_file_by_id(&ctx, file_id).await? {
+    let file = match get_file_by_id(&ctx, database_type, file_id).await? {
         Some(val) => val,
         None => {
             return Response::error(
@@ -314,7 +376,7 @@ pub async fn files_get(url: Url, ctx: RouteContext<()>) -> Result<Response> {
         }
     };
 
-    let (file_data, read_count) = get_buf_for_file(&ctx, &file).await?;
+    let (file_data, read_count) = get_buf_for_file(&ctx, &dat_object, &file).await?;
 
     if query_params.get("format").map(|value| value.as_str()) == Some("json") {
         let file_type = file.resolved_file_type();
@@ -452,7 +514,9 @@ pub async fn icons_get(url: Url, ctx: RouteContext<()>) -> Result<Response> {
         ctx: &RouteContext<()>,
         texture_id: u32,
     ) -> std::result::Result<(Texture, usize), Response> {
-        let texture_file = match get_file_by_id(ctx, texture_id as i32).await {
+        let texture_file = match get_file_by_id(ctx, DatDatabaseType::Portal, texture_id as i32)
+            .await
+        {
             Ok(Some(file)) => file,
             _ => {
                 return Err(
@@ -467,20 +531,23 @@ pub async fn icons_get(url: Url, ctx: RouteContext<()>) -> Result<Response> {
             }
         };
 
-        let (texture_object, read_count) = match get_buf_for_file(ctx, &texture_file).await {
-            Ok(data) => data,
-            Err(_) => {
-                return Err(
-                    match Response::error(
-                        format!("Failed to read texture file for ID {:X}", texture_id),
-                        400,
-                    ) {
-                        Ok(resp) => resp,
-                        Err(e) => return Err(Response::from_html(format!("Error: {}", e)).unwrap()),
-                    },
-                )
-            }
-        };
+        let (texture_object, read_count) =
+            match get_buf_for_file(ctx, "client_portal.dat", &texture_file).await {
+                Ok(data) => data,
+                Err(_) => {
+                    return Err(
+                        match Response::error(
+                            format!("Failed to read texture file for ID {:X}", texture_id),
+                            400,
+                        ) {
+                            Ok(resp) => resp,
+                            Err(e) => {
+                                return Err(Response::from_html(format!("Error: {}", e)).unwrap())
+                            }
+                        },
+                    )
+                }
+            };
         let mut buf_reader = Cursor::new(texture_object);
         let texture_file: DatFile<Texture> = match DatFile::read(&mut buf_reader) {
             Ok(file) => file,
@@ -582,7 +649,7 @@ pub async fn icons_get(url: Url, ctx: RouteContext<()>) -> Result<Response> {
     };
 
     // Look up Icon by ID against D1 Database
-    let base_file = match get_file_by_id(&ctx, param_id_num).await? {
+    let base_file = match get_file_by_id(&ctx, DatDatabaseType::Portal, param_id_num).await? {
         Some(val) => val,
         None => {
             return Response::error(
@@ -593,7 +660,7 @@ pub async fn icons_get(url: Url, ctx: RouteContext<()>) -> Result<Response> {
     };
 
     // Create icon
-    let (base_object, base_count) = get_buf_for_file(&ctx, &base_file).await?;
+    let (base_object, base_count) = get_buf_for_file(&ctx, "client_portal.dat", &base_file).await?;
     total_read_count += base_count;
     let mut buf_reader = Cursor::new(base_object);
     let outer_file: DatFile<Texture> = DatFile::read(&mut buf_reader)?;

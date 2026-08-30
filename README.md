@@ -8,7 +8,8 @@ Built with Cloudflare Workers, R2, and D1.
 | Route | Description | Example |
 |-------|-------------|---------|
 | [`/`](https://dats.treestats.net/) | OpenAPI specification | [`https://dats.treestats.net/`](https://dats.treestats.net/) |
-| [`/files`](https://dats.treestats.net/files) | List all file IDs | [`https://dats.treestats.net/files`](https://dats.treestats.net/files) |
+| [`/dats/:dat/files`](https://dats.treestats.net/dats/portal/files) | List all file IDs in a DAT | [`https://dats.treestats.net/dats/portal/files`](https://dats.treestats.net/dats/portal/files) |
+| [`/dats/:dat/files/:file_id`](https://dats.treestats.net/dats/portal/files/16777217) | Get a file by ID from a DAT | [`https://dats.treestats.net/dats/portal/files/16777217`](https://dats.treestats.net/dats/portal/files/16777217) |
 | [`/icons`](https://dats.treestats.net/icons) | List all icon IDs | [`https://dats.treestats.net/icons`](https://dats.treestats.net/icons) |
 | [`/icons/:id`](https://dats.treestats.net/icons/26967) | Get icon as PNG | [`https://dats.treestats.net/icons/26967?scale=2`](https://dats.treestats.net/icons/26967?scale=2) |
 
@@ -26,7 +27,9 @@ Note that this crate must use the same version of the `worker` crate because of 
 To update the index on D1, run
 
 ```sh
+# Index each DAT you want to serve. The database_type is inferred from the filename.
 cargo run --bin create_index --features=index -- client_portal.dat
+cargo run --bin create_index --features=index -- client_cell.dat
 # this creates data/index.sqlite
 sh scripts/sync_d1.sh
 # this dumps the database we just created, converts it to .sql, and executes

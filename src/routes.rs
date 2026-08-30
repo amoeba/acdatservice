@@ -23,8 +23,38 @@ struct DebugResponse {
     ui_effect: Option<String>,
 }
 
+#[derive(serde::Deserialize)]
+struct FileCountRow {
+    database_type: i64,
+    count: i64,
+}
+
+#[derive(serde::Serialize)]
+struct DatInfo {
+    name: String,
+    object_key: String,
+    file_count: i64,
+}
+
+#[derive(serde::Serialize)]
+struct DatsResponse {
+    portal: DatInfo,
+    cell: DatInfo,
+}
+
 pub async fn index_get(_ctx: RouteContext<()>) -> Result<Response> {
     let mut paths = HashMap::new();
+    paths.insert(
+        "/dats".to_string(),
+        PathItem {
+            get: Some(Operation {
+                summary: "List available DATs".to_string(),
+                description: "Returns a JSON object describing the available DATs (portal and cell) with their R2 object keys and file counts.".to_string(),
+                operation_id: "dats_index".to_string(),
+                parameters: vec![],
+            }),
+        },
+    );
     paths.insert(
         "/dats/{dat}/files".to_string(),
         PathItem {
@@ -325,6 +355,44 @@ pub async fn index_get(_ctx: RouteContext<()>) -> Result<Response> {
         .headers_mut()
         .set("Content-Type", "application/json")?;
 
+    Ok(with_cors_headers(response))
+}
+
+pub async fn dats_index(ctx: RouteContext<()>) -> Result<Response> {
+    let db = ctx.d1("DATS_DB")?;
+    let statement =
+        db.prepare("SELECT database_type, COUNT(*) as count FROM files GROUP BY database_type");
+    let query = statement.bind(&[])?;
+
+    let results = query.all().await?;
+    let mut counts: HashMap<i64, i64> = HashMap::new();
+
+    for row in results.results::<FileCountRow>()? {
+        counts.insert(row.database_type, row.count);
+    }
+
+    let response = DatsResponse {
+        portal: DatInfo {
+            name: "portal".to_string(),
+            object_key: "client_portal.dat".to_string(),
+            file_count: *counts
+                .get(&(DatDatabaseType::Portal.as_u32() as i64))
+                .unwrap_or(&0),
+        },
+        cell: DatInfo {
+            name: "cell".to_string(),
+            object_key: "client_cell_1.dat".to_string(),
+            file_count: *counts
+                .get(&(DatDatabaseType::Cell.as_u32() as i64))
+                .unwrap_or(&0),
+        },
+    };
+
+    let json = serde_json::to_string_pretty(&response)?;
+    let mut response = Response::from_body(worker::ResponseBody::Body(json.into()))?;
+    response
+        .headers_mut()
+        .set("Content-Type", "application/json")?;
     Ok(with_cors_headers(response))
 }
 

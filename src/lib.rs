@@ -7,7 +7,7 @@ use acprotocol::dat::{
 };
 use byteorder::{BigEndian, ReadBytesExt};
 use counting_reader::CountingRangeReader;
-use routes::{files_get, files_index, icons_get, icons_index, index_get};
+use routes::{dats_index, files_get, files_index, icons_get, icons_index, index_get};
 use worker::*;
 
 mod counting_reader;
@@ -50,6 +50,7 @@ async fn fetch(req: Request, env: Env, _ctx: Context) -> Result<Response> {
     let icons_url = url_string.clone();
     let response = router
         .get_async("/", |_, ctx| index_get(ctx))
+        .get_async("/dats", |_, ctx| dats_index(ctx))
         .get_async("/dats/:dat/files", move |_, ctx| {
             files_index(files_index_url.clone(), ctx)
         })

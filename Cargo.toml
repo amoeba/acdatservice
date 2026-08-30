@@ -40,6 +40,7 @@ serde_json = "1.0.140"
 sqlite = { version = "0.36.1", optional = true }
 strum = { version = "0.27.2", features = ["derive"], optional = true }
 worker = { version = "0.8.1", features = ["d1", "http"] }
+wasm-bindgen = "0.2.125"
 
 [target.'cfg(not(target_arch = "wasm32"))'.dependencies]
 tokio = { version = "1.45.1", features = [

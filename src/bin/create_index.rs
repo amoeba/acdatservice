@@ -152,12 +152,28 @@ fn create_index(
 
         match dat_file_type {
             DatFileType::Texture => {
-                let outer_file: DatFile<Texture> = DatFile::read(&mut buf_reader)?;
-                let icon = outer_file.inner;
-                if icon.width == 32 && icon.height == 32 {
-                    statement.bind((subtype_col_index, DatFileSubtype::Icon.as_u32() as i64))?;
-                } else {
-                    statement.bind((subtype_col_index, DatFileSubtype::None.as_u32() as i64))?;
+                // Some textures (especially in cell DATs) use unsupported pixel formats.
+                // If we can't parse it, treat it as a non-icon texture rather than
+                // failing the entire index.
+                match DatFile::<Texture>::read(&mut buf_reader) {
+                    Ok(outer_file) => {
+                        let icon = outer_file.inner;
+                        if icon.width == 32 && icon.height == 32 {
+                            statement
+                                .bind((subtype_col_index, DatFileSubtype::Icon.as_u32() as i64))?;
+                        } else {
+                            statement
+                                .bind((subtype_col_index, DatFileSubtype::None.as_u32() as i64))?;
+                        }
+                    }
+                    Err(err) => {
+                        eprintln!(
+                            "Warning: failed to parse texture {} (0x{:X}): {}. Treating as non-icon.",
+                            file.object_id, file.object_id, err
+                        );
+                        statement
+                            .bind((subtype_col_index, DatFileSubtype::None.as_u32() as i64))?;
+                    }
                 }
             }
             _ => {
@@ -176,28 +192,35 @@ fn create_index(
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     let args: Vec<String> = env::args().collect();
 
-    if args.len() != 2 {
-        return Err(Box::from("Must specify path to dat file to index."));
+    if args.len() < 2 {
+        return Err(Box::from(
+            "Must specify at least one path to a dat file to index.",
+        ));
     }
 
-    let dat_path = &args[1];
+    let dat_paths = &args[1..];
 
-    if !Path::new(dat_path).exists() {
-        return Err(Box::from(format!(
-            "Provided dat file path doesn't exist: {}",
-            dat_path
-        )));
+    for dat_path in dat_paths {
+        if !Path::new(dat_path).exists() {
+            return Err(Box::from(format!(
+                "Provided dat file path doesn't exist: {}",
+                dat_path
+            )));
+        }
     }
 
     let db_path = "./data/index.sqlite";
     let connection = sqlite::open(db_path)?;
 
-    let database_type = dat_type_from_path(dat_path);
-
     setup()?;
     migrate(&connection)?;
     seed(&connection)?;
-    create_index(&connection, dat_path, database_type)?;
+
+    for dat_path in dat_paths {
+        let database_type = dat_type_from_path(dat_path);
+        create_index(&connection, dat_path, database_type)?;
+    }
+
     show_data(&connection)?;
 
     Ok(())

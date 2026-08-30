@@ -8,11 +8,12 @@ use acprotocol::dat::{
     },
     DatDatabaseType, DatFileSubtype, DatFileType,
 };
+use sha2::{Digest, Sha256};
 use sqlite::{self, Connection};
 use std::{
     env,
     fs::{self, File},
-    io::Cursor,
+    io::{Cursor, Read},
     path::Path,
 };
 use strum::IntoEnumIterator;
@@ -66,6 +67,16 @@ fn migrate(connection: &Connection) -> Result<(), Box<dyn std::error::Error>> {
         )",
     )?;
 
+    connection.execute("DROP TABLE IF EXISTS dats;")?;
+    connection.execute(
+        "CREATE TABLE IF NOT EXISTS dats (
+            database_type INTEGER NOT NULL PRIMARY KEY,
+            object_key TEXT NOT NULL,
+            size_bytes INTEGER NOT NULL,
+            sha256 TEXT NOT NULL
+        )",
+    )?;
+
     Ok(())
 }
 
@@ -107,6 +118,20 @@ fn show_data(connection: &Connection) -> Result<(), Box<dyn std::error::Error>> 
         println!("Count: {}", count);
     }
 
+    let mut statement =
+        connection.prepare("SELECT database_type, object_key, size_bytes, sha256 FROM dats;")?;
+
+    while let sqlite::State::Row = statement.next()? {
+        let database_type: i64 = statement.read(0)?;
+        let object_key: String = statement.read(1)?;
+        let size_bytes: i64 = statement.read(2)?;
+        let sha256: String = statement.read(3)?;
+        println!(
+            "DAT: database_type={}, object_key={}, size_bytes={}, sha256={}",
+            database_type, object_key, size_bytes, sha256
+        );
+    }
+
     Ok(())
 }
 
@@ -117,6 +142,65 @@ fn dat_type_from_path(dat_path: &str) -> DatDatabaseType {
     } else {
         DatDatabaseType::Portal
     }
+}
+
+fn object_key_from_path(dat_path: &str) -> String {
+    Path::new(dat_path)
+        .file_name()
+        .and_then(|name| name.to_str())
+        .unwrap_or(dat_path)
+        .to_string()
+}
+
+fn bytes_to_hex(bytes: &[u8]) -> String {
+    let mut hex = String::with_capacity(bytes.len() * 2);
+    for byte in bytes {
+        hex.push_str(&format!("{:02x}", byte));
+    }
+    hex
+}
+
+fn sha256_file(path: &str) -> Result<String, Box<dyn std::error::Error>> {
+    let mut file = File::open(path)?;
+    let mut hasher = Sha256::new();
+    let mut buffer = [0u8; 8192];
+
+    loop {
+        let bytes_read = file.read(&mut buffer)?;
+        if bytes_read == 0 {
+            break;
+        }
+        hasher.update(&buffer[..bytes_read]);
+    }
+
+    let result = hasher.finalize();
+    Ok(bytes_to_hex(&result))
+}
+
+fn record_dat_metadata(
+    connection: &Connection,
+    dat_path: &str,
+    database_type: DatDatabaseType,
+) -> Result<(), Box<dyn std::error::Error>> {
+    let object_key = object_key_from_path(dat_path);
+    let size_bytes = fs::metadata(dat_path)?.len();
+    let sha256 = sha256_file(dat_path)?;
+
+    let mut statement = connection.prepare(
+        "INSERT OR REPLACE INTO dats (database_type, object_key, size_bytes, sha256) VALUES (?, ?, ?, ?)",
+    )?;
+    statement.bind((1, database_type.as_u32() as i64))?;
+    statement.bind((2, object_key.as_str()))?;
+    statement.bind((3, size_bytes as i64))?;
+    statement.bind((4, sha256.as_str()))?;
+    statement.next()?;
+
+    println!(
+        "Recorded metadata for {}: size={} bytes, sha256={}",
+        object_key, size_bytes, sha256
+    );
+
+    Ok(())
 }
 
 fn create_index(
@@ -218,6 +302,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     for dat_path in dat_paths {
         let database_type = dat_type_from_path(dat_path);
+        record_dat_metadata(&connection, dat_path, database_type.clone())?;
         create_index(&connection, dat_path, database_type)?;
     }
 

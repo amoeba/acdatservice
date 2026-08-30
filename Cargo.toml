@@ -37,6 +37,7 @@ image = { version = "0.25.5", default-features = false, features = ["png"] }
 schemars = { version = "0.8", features = ["derive"] }
 serde = { version = "1.0.219", features = ["derive"] }
 serde_json = "1.0.140"
+sha2 = { version = "0.10.8", optional = true }
 sqlite = { version = "0.36.1", optional = true }
 strum = { version = "0.27.2", features = ["derive"], optional = true }
 worker = { version = "0.8.1", features = ["d1", "http"] }
@@ -65,4 +66,4 @@ tokio = { version = "1", features = ["rt", "macros"] }
 [features]
 default = []
 dropshot = ["dep:dropshot", "dep:tokio"]
-index = ["dep:sqlite", "dep:strum"]
+index = ["dep:sqlite", "dep:strum", "dep:sha2"]

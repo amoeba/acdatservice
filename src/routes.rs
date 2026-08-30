@@ -29,11 +29,21 @@ struct FileCountRow {
     count: i64,
 }
 
+#[derive(serde::Deserialize)]
+struct DatMetadataRow {
+    database_type: i64,
+    object_key: String,
+    size_bytes: i64,
+    sha256: String,
+}
+
 #[derive(serde::Serialize)]
 struct DatInfo {
     name: String,
     object_key: String,
     file_count: i64,
+    size_bytes: i64,
+    sha256: String,
 }
 
 #[derive(serde::Serialize)]
@@ -49,7 +59,7 @@ pub async fn index_get(_ctx: RouteContext<()>) -> Result<Response> {
         PathItem {
             get: Some(Operation {
                 summary: "List available DATs".to_string(),
-                description: "Returns a JSON object describing the available DATs (portal and cell) with their R2 object keys and file counts.".to_string(),
+                description: "Returns a JSON object describing the available DATs (portal and cell) with their R2 object keys, file counts, size in bytes, and sha256 hashes.".to_string(),
                 operation_id: "dats_index".to_string(),
                 parameters: vec![],
             }),
@@ -360,32 +370,64 @@ pub async fn index_get(_ctx: RouteContext<()>) -> Result<Response> {
 
 pub async fn dats_index(ctx: RouteContext<()>) -> Result<Response> {
     let db = ctx.d1("DATS_DB")?;
-    let statement =
+
+    // File counts per DAT
+    let count_statement =
         db.prepare("SELECT database_type, COUNT(*) as count FROM files GROUP BY database_type");
-    let query = statement.bind(&[])?;
-
-    let results = query.all().await?;
+    let count_query = count_statement.bind(&[])?;
+    let count_results = count_query.all().await?;
     let mut counts: HashMap<i64, i64> = HashMap::new();
-
-    for row in results.results::<FileCountRow>()? {
+    for row in count_results.results::<FileCountRow>()? {
         counts.insert(row.database_type, row.count);
     }
 
+    // DAT metadata (size, sha256, object key)
+    let meta_statement =
+        db.prepare("SELECT database_type, object_key, size_bytes, sha256 FROM dats");
+    let meta_query = meta_statement.bind(&[])?;
+    let meta_results = meta_query.all().await?;
+    let mut metadata: HashMap<i64, DatMetadataRow> = HashMap::new();
+    for row in meta_results.results::<DatMetadataRow>()? {
+        metadata.insert(row.database_type, row);
+    }
+
+    fn build_dat_info(
+        name: &str,
+        default_object_key: &str,
+        database_type: DatDatabaseType,
+        counts: &HashMap<i64, i64>,
+        metadata: &HashMap<i64, DatMetadataRow>,
+    ) -> DatInfo {
+        let db_type_value = database_type.as_u32() as i64;
+        let meta = metadata.get(&db_type_value);
+        DatInfo {
+            name: name.to_string(),
+            object_key: meta
+                .map(|m| m.object_key.clone())
+                .unwrap_or_else(|| default_object_key.to_string()),
+            file_count: *counts.get(&db_type_value).unwrap_or(&0),
+            size_bytes: meta.map(|m| m.size_bytes).unwrap_or(0),
+            sha256: meta
+                .map(|m| m.sha256.clone())
+                .unwrap_or_else(|| "unknown".to_string()),
+        }
+    }
+
     let response = DatsResponse {
-        portal: DatInfo {
-            name: "portal".to_string(),
-            object_key: "client_portal.dat".to_string(),
-            file_count: *counts
-                .get(&(DatDatabaseType::Portal.as_u32() as i64))
-                .unwrap_or(&0),
-        },
-        cell: DatInfo {
-            name: "cell".to_string(),
-            object_key: "client_cell_1.dat".to_string(),
-            file_count: *counts
-                .get(&(DatDatabaseType::Cell.as_u32() as i64))
-                .unwrap_or(&0),
-        },
+        portal: build_dat_info(
+            "portal",
+            "client_portal.dat",
+            DatDatabaseType::Portal,
+            &counts,
+            &metadata,
+        ),
+        cell: build_dat_info(
+            "cell",
+            "client_cell_1.dat",
+            DatDatabaseType::Cell,
+            &counts,
+            &metadata,
+        ),
     };
 
     let json = serde_json::to_string_pretty(&response)?;

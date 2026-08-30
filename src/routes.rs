@@ -1,6 +1,6 @@
 use acprotocol::dat::{
     file_types::{dat_file::DatFile, texture::Texture, CharGen, SpellTable},
-    DatDatabaseType, DatFileSubtype, DatFileType, Icon,
+    DatFileSubtype, DatFileType, Icon,
 };
 use std::{collections::HashMap, fmt::Debug, io::Cursor};
 use worker::*;
@@ -10,6 +10,7 @@ use crate::{
     get_buf_for_file, get_file_by_id,
     openapi::{Contact, Info, OpenApiDocument, Operation, Parameter, PathItem, Schema, Server},
     parse_dat_param, parse_decimal_or_hex_string, parse_file_id, with_cors_headers,
+    DatDatabaseType,
 };
 
 #[allow(dead_code)]
@@ -50,6 +51,8 @@ struct DatInfo {
 struct DatsResponse {
     portal: DatInfo,
     cell: DatInfo,
+    highres: DatInfo,
+    local_english: DatInfo,
 }
 
 pub async fn index_get(_ctx: RouteContext<()>) -> Result<Response> {
@@ -59,7 +62,7 @@ pub async fn index_get(_ctx: RouteContext<()>) -> Result<Response> {
         PathItem {
             get: Some(Operation {
                 summary: "List available DATs".to_string(),
-                description: "Returns a JSON object describing the available DATs (portal and cell) with their R2 object keys, file counts, size in bytes, and sha256 hashes.".to_string(),
+                description: "Returns a JSON object describing the available DATs (portal, cell, highres, and local_english) with their R2 object keys, file counts, size in bytes, and sha256 hashes.".to_string(),
                 operation_id: "dats_index".to_string(),
                 parameters: vec![],
             }),
@@ -76,7 +79,7 @@ pub async fn index_get(_ctx: RouteContext<()>) -> Result<Response> {
                     Parameter {
                         name: "dat".to_string(),
                         location: "path".to_string(),
-                        description: "DAT name. Use 'portal' or 'cell'.".to_string(),
+                        description: "DAT name. Use 'portal', 'cell', 'highres', or 'local_english'.".to_string(),
                         required: true,
                         schema: Schema::ObjectSchema {
                             schema_type: "string".to_string(),
@@ -145,7 +148,7 @@ pub async fn index_get(_ctx: RouteContext<()>) -> Result<Response> {
                     Parameter {
                         name: "dat".to_string(),
                         location: "path".to_string(),
-                        description: "DAT name. Use 'portal' or 'cell'.".to_string(),
+                        description: "DAT name. Use 'portal', 'cell', 'highres', or 'local_english'.".to_string(),
                         required: true,
                         schema: Schema::ObjectSchema {
                             schema_type: "string".to_string(),
@@ -428,6 +431,20 @@ pub async fn dats_index(ctx: RouteContext<()>) -> Result<Response> {
             &counts,
             &metadata,
         ),
+        highres: build_dat_info(
+            "highres",
+            "client_highres.dat",
+            DatDatabaseType::Highres,
+            &counts,
+            &metadata,
+        ),
+        local_english: build_dat_info(
+            "local_english",
+            "client_local_English.dat",
+            DatDatabaseType::LocalEnglish,
+            &counts,
+            &metadata,
+        ),
     };
 
     let json = serde_json::to_string_pretty(&response)?;
@@ -533,7 +550,7 @@ pub async fn files_get(url: Url, ctx: RouteContext<()>) -> Result<Response> {
         None => return Response::error("Must specify DAT name.", 400),
     };
 
-    let (database_type, dat_object) = match parse_dat_param(param_dat) {
+    let (database_type, _) = match parse_dat_param(param_dat) {
         Ok(val) => val,
         Err(err) => return Response::error(err.to_string(), 400),
     };
@@ -558,7 +575,7 @@ pub async fn files_get(url: Url, ctx: RouteContext<()>) -> Result<Response> {
         }
     };
 
-    let (file_data, read_count) = get_buf_for_file(&ctx, &dat_object, &file).await?;
+    let (file_data, read_count) = get_buf_for_file(&ctx, database_type, &file).await?;
 
     if query_params.get("format").map(|value| value.as_str()) == Some("json") {
         let file_type = file.resolved_file_type();
@@ -696,7 +713,7 @@ pub async fn icons_get(url: Url, ctx: RouteContext<()>) -> Result<Response> {
         ctx: &RouteContext<()>,
         texture_id: u32,
     ) -> std::result::Result<(Texture, usize), Response> {
-        let texture_file = match get_file_by_id(ctx, DatDatabaseType::Portal, texture_id as i32)
+        let texture_file = match get_file_by_id(ctx, DatDatabaseType::Portal, texture_id as u32)
             .await
         {
             Ok(Some(file)) => file,
@@ -714,7 +731,7 @@ pub async fn icons_get(url: Url, ctx: RouteContext<()>) -> Result<Response> {
         };
 
         let (texture_object, read_count) =
-            match get_buf_for_file(ctx, "client_portal.dat", &texture_file).await {
+            match get_buf_for_file(ctx, DatDatabaseType::Portal, &texture_file).await {
                 Ok(data) => data,
                 Err(_) => {
                     return Err(
@@ -831,7 +848,8 @@ pub async fn icons_get(url: Url, ctx: RouteContext<()>) -> Result<Response> {
     };
 
     // Look up Icon by ID against D1 Database
-    let base_file = match get_file_by_id(&ctx, DatDatabaseType::Portal, param_id_num).await? {
+    let base_file = match get_file_by_id(&ctx, DatDatabaseType::Portal, param_id_num as u32).await?
+    {
         Some(val) => val,
         None => {
             return Response::error(
@@ -842,7 +860,8 @@ pub async fn icons_get(url: Url, ctx: RouteContext<()>) -> Result<Response> {
     };
 
     // Create icon
-    let (base_object, base_count) = get_buf_for_file(&ctx, "client_portal.dat", &base_file).await?;
+    let (base_object, base_count) =
+        get_buf_for_file(&ctx, DatDatabaseType::Portal, &base_file).await?;
     total_read_count += base_count;
     let mut buf_reader = Cursor::new(base_object);
     let outer_file: DatFile<Texture> = DatFile::read(&mut buf_reader)?;

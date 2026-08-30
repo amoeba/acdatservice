@@ -1,12 +1,13 @@
 #![cfg(feature = "index")]
 
+use acdatservice::DatDatabaseType;
 use acprotocol::dat::{
     file_types::{dat_file::DatFile, texture::Texture},
     reader::{
         sync_dat_file_reader::SyncDatFileReader, sync_file_reader::SyncFileRangeReader,
         types::dat_database::DatDatabase,
     },
-    DatDatabaseType, DatFileSubtype, DatFileType,
+    DatFileSubtype, DatFileType,
 };
 use sha2::{Digest, Sha256};
 use sqlite::{self, Connection};
@@ -17,9 +18,6 @@ use std::{
     path::Path,
 };
 use strum::IntoEnumIterator;
-
-// Type annotation needed for type inference
-type DbType = DatDatabaseType;
 type FileType = DatFileType;
 
 fn setup() -> Result<(), Box<dyn std::error::Error>> {
@@ -82,11 +80,10 @@ fn migrate(connection: &Connection) -> Result<(), Box<dyn std::error::Error>> {
 
 fn seed(connection: &Connection) -> Result<(), Box<dyn std::error::Error>> {
     // database_types
-    for db_type in DatDatabaseType::iter() {
+    for db_type in DatDatabaseType::ALL {
         let mut statement = connection.prepare("INSERT INTO database_types VALUES(?, ?);")?;
-        let dt: DbType = db_type;
-        statement.bind((1, dt.as_u32() as i64))?;
-        statement.bind((2, dt.to_string().as_str()))?;
+        statement.bind((1, db_type.as_u32() as i64))?;
+        statement.bind((2, db_type.name()))?;
         statement.next()?; // Is this really how we execute a prepared statement?
     }
 
@@ -136,12 +133,13 @@ fn show_data(connection: &Connection) -> Result<(), Box<dyn std::error::Error>> 
 }
 
 fn dat_type_from_path(dat_path: &str) -> DatDatabaseType {
-    let lower = dat_path.to_ascii_lowercase();
-    if lower.contains("cell") {
-        DatDatabaseType::Cell
-    } else {
-        DatDatabaseType::Portal
-    }
+    let file_name = Path::new(dat_path)
+        .file_name()
+        .and_then(|name| name.to_str())
+        .unwrap_or(dat_path);
+    acdatservice::parse_dat_param(file_name)
+        .map(|(database_type, _)| database_type)
+        .unwrap_or_else(|error| panic!("Unsupported DAT filename {}: {}", file_name, error))
 }
 
 fn object_key_from_path(dat_path: &str) -> String {

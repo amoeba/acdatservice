@@ -9,7 +9,7 @@ Built with Cloudflare Workers, R2, and D1.
 |-------|-------------|---------|
 | [`/`](https://dats.treestats.net/) | OpenAPI specification | [`https://dats.treestats.net/`](https://dats.treestats.net/) |
 | [`/dats`](https://dats.treestats.net/dats) | List available DATs with file counts, sizes, and sha256 hashes | [`https://dats.treestats.net/dats`](https://dats.treestats.net/dats) |
-| [`/dats/:dat/files`](https://dats.treestats.net/dats/portal/files) | List file IDs in a DAT (paginated, default limit 10000) | [`https://dats.treestats.net/dats/portal/files?limit=100&offset=0`](https://dats.treestats.net/dats/portal/files?limit=100&offset=0) |
+| [`/dats/:dat/files`](https://dats.treestats.net/dats/portal/files) | List file IDs in a DAT (paginated, default limit 10000). DAT names: `portal`, `cell`, `highres`, `local_english` | [`https://dats.treestats.net/dats/portal/files?limit=100&offset=0`](https://dats.treestats.net/dats/portal/files?limit=100&offset=0) |
 | [`/dats/:dat/files/:file_id`](https://dats.treestats.net/dats/portal/files/16777217) | Get a file by ID from a DAT | [`https://dats.treestats.net/dats/portal/files/16777217`](https://dats.treestats.net/dats/portal/files/16777217) |
 | [`/icons`](https://dats.treestats.net/icons) | List all icon IDs | [`https://dats.treestats.net/icons`](https://dats.treestats.net/icons) |
 | [`/icons/:id`](https://dats.treestats.net/icons/26967) | Get icon as PNG | [`https://dats.treestats.net/icons/26967?scale=2`](https://dats.treestats.net/icons/26967?scale=2) |
@@ -28,8 +28,14 @@ Note that this crate must use the same version of the `worker` crate because of 
 To update the index on D1, run
 
 ```sh
-# Index each DAT you want to serve. The database_type is inferred from the filename.
-cargo run --bin create_index --features=index -- client_portal.dat client_cell_1.dat
+# Upload each DAT to R2. The object key must match the filename.
+npx wrangler r2 object put treestats-acdats/client_portal.dat --remote --file client_portal.dat
+npx wrangler r2 object put treestats-acdats/client_cell_1.dat --remote --file client_cell_1.dat
+npx wrangler r2 object put treestats-acdats/client_highres.dat --remote --file client_highres.dat
+npx wrangler r2 object put treestats-acdats/client_local_English.dat --remote --file client_local_English.dat
+
+# Index each DAT you want to serve. The database type is inferred from the filename.
+cargo run --bin create_index --features=index -- client_portal.dat client_cell_1.dat client_highres.dat client_local_English.dat
 # this creates data/index.sqlite
 sh scripts/sync_d1.sh
 # this dumps the database we just created, converts it to .sql, and executes

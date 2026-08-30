@@ -13,7 +13,7 @@ release = false
 wasm-opt = false
 
 [lib]
-crate-type = ["cdylib"]
+crate-type = ["cdylib", "rlib"]
 
 [[bin]]
 name = "create_index"

@@ -1,12 +1,32 @@
 #[cfg(test)]
 mod tests {
-    use crate::{dat_block_size, db::File, parse_decimal_or_hex_string};
+    use crate::{
+        dat_block_size, db::File, parse_dat_param, parse_decimal_or_hex_string, parse_file_id,
+        DatDatabaseType,
+    };
     use acprotocol::dat::DatFileType;
 
     #[test]
     fn test_dat_block_size_matches_database_type() {
-        assert_eq!(dat_block_size("client_portal.dat"), 1024);
-        assert_eq!(dat_block_size("CLIENT_CELL_1.DAT"), 256);
+        assert_eq!(dat_block_size(DatDatabaseType::Portal), 1024);
+        assert_eq!(dat_block_size(DatDatabaseType::Cell), 256);
+        assert_eq!(dat_block_size(DatDatabaseType::Highres), 1024);
+        assert_eq!(dat_block_size(DatDatabaseType::LocalEnglish), 1024);
+    }
+
+    #[test]
+    fn test_parse_dat_param_recognizes_all_dats() {
+        assert_eq!(
+            parse_dat_param("highres").unwrap(),
+            (DatDatabaseType::Highres, "client_highres.dat".to_string())
+        );
+        assert_eq!(
+            parse_dat_param("client_local_English.dat").unwrap(),
+            (
+                DatDatabaseType::LocalEnglish,
+                "client_local_English.dat".to_string()
+            )
+        );
     }
 
     #[test]
@@ -59,6 +79,15 @@ mod tests {
         assert!(parse_decimal_or_hex_string("12.34").is_err());
         assert!(parse_decimal_or_hex_string("0x1").is_err());
         assert!(parse_decimal_or_hex_string("0x12345").is_err());
+    }
+
+    #[test]
+    fn test_parse_file_id_accepts_unsigned_32_bit_values() {
+        assert_eq!(parse_file_id("0xa7b2ffff").unwrap(), 2813526015);
+        assert_eq!(parse_file_id("2813526015").unwrap(), 2813526015);
+        assert!(parse_file_id("-1481441281").is_err());
+        assert!(parse_file_id("0x100000000").is_err());
+        assert!(parse_file_id("4294967296").is_err());
     }
 
     #[test]

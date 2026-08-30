@@ -1,9 +1,8 @@
 use std::error::Error;
 use std::io::Cursor;
 
-use acprotocol::dat::{
-    reader::{dat_file_reader::DatFileReader, worker_r2_reader::WorkerR2RangeReader},
-    DatDatabaseType,
+use acprotocol::dat::reader::{
+    dat_file_reader::DatFileReader, worker_r2_reader::WorkerR2RangeReader,
 };
 use byteorder::{BigEndian, ReadBytesExt};
 use counting_reader::CountingRangeReader;
@@ -16,6 +15,60 @@ mod generators;
 mod lib_test;
 mod openapi;
 mod routes;
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+#[repr(u32)]
+pub enum DatDatabaseType {
+    Portal,
+    Cell,
+    Highres,
+    LocalEnglish,
+}
+
+impl DatDatabaseType {
+    pub const ALL: [Self; 4] = [Self::Portal, Self::Cell, Self::Highres, Self::LocalEnglish];
+
+    pub fn as_u32(self) -> u32 {
+        self as u32
+    }
+
+    pub fn from_u32(value: u32) -> Option<Self> {
+        Self::ALL
+            .into_iter()
+            .find(|database_type| database_type.as_u32() == value)
+    }
+
+    pub fn name(self) -> &'static str {
+        match self {
+            Self::Portal => "portal",
+            Self::Cell => "cell",
+            Self::Highres => "highres",
+            Self::LocalEnglish => "local_english",
+        }
+    }
+
+    pub fn object_key(self) -> &'static str {
+        match self {
+            Self::Portal => "client_portal.dat",
+            Self::Cell => "client_cell_1.dat",
+            Self::Highres => "client_highres.dat",
+            Self::LocalEnglish => "client_local_English.dat",
+        }
+    }
+
+    pub fn block_size(self) -> usize {
+        match self {
+            Self::Cell => 256,
+            Self::Portal | Self::Highres | Self::LocalEnglish => 1024,
+        }
+    }
+}
+
+impl std::fmt::Display for DatDatabaseType {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter.write_str(self.name())
+    }
+}
 
 fn with_cors_headers(mut response: Response) -> Response {
     let headers = response.headers_mut();
@@ -69,53 +122,44 @@ async fn fetch(req: Request, env: Env, _ctx: Context) -> Result<Response> {
 }
 
 /// Parse the :dat path parameter into a database type and the corresponding R2 object key.
-/// Accepts short names ("portal", "cell") and full filenames ("client_portal.dat",
-/// "client_cell.dat", "client_cell_1.dat", etc.).
+/// Accepts short names and their full client DAT filenames.
 pub fn parse_dat_param(
     text: &str,
 ) -> std::result::Result<(DatDatabaseType, String), Box<dyn Error>> {
     let normalized = text.to_ascii_lowercase();
 
-    // If the parameter already looks like a filename, use it directly as the R2 key.
-    if normalized.ends_with(".dat") {
-        let db_type = if normalized.contains("cell") {
-            DatDatabaseType::Cell
-        } else {
-            DatDatabaseType::Portal
-        };
-        return Ok((db_type, normalized));
-    }
-
-    // Otherwise treat it as a short name and map to the actual R2 object key.
-    let (db_type, object_key) = if normalized == "portal" {
-        (DatDatabaseType::Portal, "client_portal.dat".to_string())
-    } else if normalized == "cell" {
-        // The live cell DAT is named client_cell_1.dat in both R2 and the ACE repo.
-        (DatDatabaseType::Cell, "client_cell_1.dat".to_string())
-    } else {
-        return Err(format!("Invalid dat name: {}. Expected portal or cell.", text).into());
+    let database_type = match normalized.as_str() {
+        "portal" | "client_portal.dat" => DatDatabaseType::Portal,
+        "cell" | "client_cell.dat" | "client_cell_1.dat" => DatDatabaseType::Cell,
+        "highres" | "client_highres.dat" => DatDatabaseType::Highres,
+        "local_english" | "local-english" | "client_local_english.dat" => {
+            DatDatabaseType::LocalEnglish
+        }
+        _ => {
+            return Err(format!(
+                "Invalid dat name: {}. Expected portal, cell, highres, or local_english.",
+                text
+            )
+            .into())
+        }
     };
 
-    Ok((db_type, object_key))
+    Ok((database_type, database_type.object_key().to_string()))
 }
 
-fn dat_block_size(dat_object: &str) -> usize {
-    if dat_object.to_ascii_lowercase().contains("cell") {
-        256
-    } else {
-        1024
-    }
+fn dat_block_size(database_type: DatDatabaseType) -> usize {
+    database_type.block_size()
 }
 
 pub async fn get_buf_for_file(
     ctx: &RouteContext<()>,
-    dat_object: &str,
+    database_type: DatDatabaseType,
     file: &db::File,
 ) -> std::result::Result<(Vec<u8>, usize), worker::Error> {
     let bucket = ctx.bucket("DATS_BUCKET")?;
-    let worker_reader = WorkerR2RangeReader::new(bucket, dat_object.to_string());
+    let worker_reader = WorkerR2RangeReader::new(bucket, database_type.object_key().to_string());
     let mut counting_reader = CountingRangeReader::new(worker_reader);
-    let mut reader = DatFileReader::new(file.file_size as usize, dat_block_size(dat_object))
+    let mut reader = DatFileReader::new(file.file_size as usize, dat_block_size(database_type))
         .map_err(|e| worker::Error::RustError(format!("Failed to create reader: {}", e)))?;
     let buf = reader
         .read_file(&mut counting_reader, file.file_offset as u32)
@@ -128,24 +172,24 @@ pub async fn get_buf_for_file(
 pub async fn get_file_by_id(
     ctx: &RouteContext<()>,
     database_type: DatDatabaseType,
-    file_id: i32,
+    file_id: u32,
 ) -> Result<Option<db::File>> {
     let db = ctx.d1("DATS_DB")?;
     let statement = db.prepare("SELECT * FROM files WHERE id = ?1 AND database_type = ?2 LIMIT 1");
     // We cast to f64 to apparently work around JS
     let database_type_value = database_type.as_u32() as f64;
-    let query = statement.bind(&[file_id.into(), database_type_value.into()])?;
+    let query = statement.bind(&[(file_id as i64).into(), database_type_value.into()])?;
 
     query.first::<crate::db::File>(None).await
 }
 
 /// Parse a file ID from decimal or hex (0x-prefixed) string.
 /// Unlike parse_decimal_or_hex_string, this does not apply any icon-specific offsets.
-pub fn parse_file_id(text: &str) -> std::result::Result<i32, Box<dyn Error>> {
+pub fn parse_file_id(text: &str) -> std::result::Result<u32, Box<dyn Error>> {
     if let Some(hex_str) = text.strip_prefix("0x").or_else(|| text.strip_prefix("0X")) {
-        i32::from_str_radix(hex_str, 16).map_err(|e| e.into())
+        u32::from_str_radix(hex_str, 16).map_err(|e| e.into())
     } else {
-        text.parse::<i32>().map_err(|e| e.into())
+        text.parse::<u32>().map_err(|e| e.into())
     }
 }
 

@@ -1,4 +1,5 @@
-use acprotocol::dat::{DatDatabaseType, DatFileSubtype, DatFileType};
+use crate::DatDatabaseType;
+use acprotocol::dat::{DatFileSubtype, DatFileType};
 use serde::{Deserialize, Serialize};
 
 #[allow(dead_code)]

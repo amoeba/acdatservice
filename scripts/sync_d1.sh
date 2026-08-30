@@ -19,6 +19,7 @@ echo "DROP TABLE IF EXISTS database_types;" > "$sql_path"
 echo "DROP TABLE IF EXISTS file_types;" >> "$sql_path"
 echo "DROP TABLE IF EXISTS file_subtypes;" >> "$sql_path"
 echo "DROP TABLE IF EXISTS files;" >> "$sql_path"
+echo "DROP TABLE IF EXISTS dats;" >> "$sql_path"
 echo "...done."
 
 echo "Using database $db_path."

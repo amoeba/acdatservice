@@ -1,7 +1,13 @@
 #[cfg(test)]
 mod tests {
-    use crate::{db::File, parse_decimal_or_hex_string};
+    use crate::{dat_block_size, db::File, parse_decimal_or_hex_string};
     use acprotocol::dat::DatFileType;
+
+    #[test]
+    fn test_dat_block_size_matches_database_type() {
+        assert_eq!(dat_block_size("client_portal.dat"), 1024);
+        assert_eq!(dat_block_size("CLIENT_CELL_1.DAT"), 256);
+    }
 
     #[test]
     fn test_parse_icon_id_string() {

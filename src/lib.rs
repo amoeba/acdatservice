@@ -99,6 +99,14 @@ pub fn parse_dat_param(
     Ok((db_type, object_key))
 }
 
+fn dat_block_size(dat_object: &str) -> usize {
+    if dat_object.to_ascii_lowercase().contains("cell") {
+        256
+    } else {
+        1024
+    }
+}
+
 pub async fn get_buf_for_file(
     ctx: &RouteContext<()>,
     dat_object: &str,
@@ -107,7 +115,7 @@ pub async fn get_buf_for_file(
     let bucket = ctx.bucket("DATS_BUCKET")?;
     let worker_reader = WorkerR2RangeReader::new(bucket, dat_object.to_string());
     let mut counting_reader = CountingRangeReader::new(worker_reader);
-    let mut reader = DatFileReader::new(file.file_size as usize, 1024_usize)
+    let mut reader = DatFileReader::new(file.file_size as usize, dat_block_size(dat_object))
         .map_err(|e| worker::Error::RustError(format!("Failed to create reader: {}", e)))?;
     let buf = reader
         .read_file(&mut counting_reader, file.file_offset as u32)

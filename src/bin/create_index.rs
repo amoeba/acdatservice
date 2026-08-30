@@ -110,7 +110,20 @@ fn show_data(connection: &Connection) -> Result<(), Box<dyn std::error::Error>> 
     Ok(())
 }
 
-fn create_index(connection: &Connection, dat_path: &str) -> Result<(), Box<dyn std::error::Error>> {
+fn dat_type_from_path(dat_path: &str) -> DatDatabaseType {
+    let lower = dat_path.to_ascii_lowercase();
+    if lower.contains("cell") {
+        DatDatabaseType::Cell
+    } else {
+        DatDatabaseType::Portal
+    }
+}
+
+fn create_index(
+    connection: &Connection,
+    dat_path: &str,
+    database_type: DatDatabaseType,
+) -> Result<(), Box<dyn std::error::Error>> {
     let mut db_file = File::open(dat_path)?;
     let db: DatDatabase = DatDatabase::read(&mut db_file)?;
     let mut db_file_reader = SyncFileRangeReader::new(db_file);
@@ -127,7 +140,7 @@ fn create_index(connection: &Connection, dat_path: &str) -> Result<(), Box<dyn s
         )?;
 
         statement.bind((1, file.object_id as i64))?;
-        statement.bind((2, DatDatabaseType::Portal.as_u32() as i64))?;
+        statement.bind((2, database_type.as_u32() as i64))?;
         statement.bind((3, dat_file_type.as_u32() as i64))?;
 
         // Read the entire file so we can find out its subtype, if anye
@@ -179,10 +192,12 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let db_path = "./data/index.sqlite";
     let connection = sqlite::open(db_path)?;
 
+    let database_type = dat_type_from_path(dat_path);
+
     setup()?;
     migrate(&connection)?;
     seed(&connection)?;
-    create_index(&connection, dat_path)?;
+    create_index(&connection, dat_path, database_type)?;
     show_data(&connection)?;
 
     Ok(())

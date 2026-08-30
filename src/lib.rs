@@ -177,8 +177,9 @@ pub async fn get_file_by_id(
     let db = ctx.d1("DATS_DB")?;
     let statement = db.prepare("SELECT * FROM files WHERE id = ?1 AND database_type = ?2 LIMIT 1");
     // We cast to f64 to apparently work around JS
+    let file_id_value = file_id as f64;
     let database_type_value = database_type.as_u32() as f64;
-    let query = statement.bind(&[(file_id as i64).into(), database_type_value.into()])?;
+    let query = statement.bind(&[file_id_value.into(), database_type_value.into()])?;
 
     query.first::<crate::db::File>(None).await
 }

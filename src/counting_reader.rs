@@ -12,13 +12,13 @@ impl<R> CountingRangeReader<R> {
 }
 
 impl<R: RangeReader> RangeReader for CountingRangeReader<R> {
-    fn read_range(
+    async fn read_range(
         &mut self,
         offset: u32,
         length: usize,
-    ) -> impl std::future::Future<Output = Result<Vec<u8>, Box<dyn std::error::Error>>> {
+    ) -> Result<Vec<u8>, Box<dyn std::error::Error>> {
         self.count += 1;
-        self.inner.read_range(offset, length)
+        self.inner.read_range(offset, length).await
     }
 }
 
@@ -29,13 +29,12 @@ mod tests {
     struct MockReader;
 
     impl RangeReader for MockReader {
-        fn read_range(
+        async fn read_range(
             &mut self,
             _offset: u32,
             length: usize,
-        ) -> impl std::future::Future<Output = Result<Vec<u8>, Box<dyn std::error::Error>>>
-        {
-            async move { Ok(vec![0u8; length]) }
+        ) -> Result<Vec<u8>, Box<dyn std::error::Error>> {
+            Ok(vec![0u8; length])
         }
     }
 

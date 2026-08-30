@@ -8,7 +8,7 @@ sql_path="data/index.sql"
 if [ ! -f "$db_path" ]; then
   echo "Database not found at path $db_path. Create first by running:"
   echo ""
-  ecoh "  cargo run --bin create_index --features=index -- client_portal.dat"
+  echo "  cargo run --bin create_index --features=index -- client_portal.dat"
   echo ""
 
   exit 1

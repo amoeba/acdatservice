@@ -28,8 +28,6 @@ acprotocol = { package = "asheron-rs", git = "https://github.com/amoeba/asheron-
   "dat-cloudflare",
   "dat-export",
 ] }
-byteorder = "1.5.0"
-byteutils = "0.1.0"
 console_error_panic_hook = { version = "0.1.1" }
 # Optional dependencies for non-WASM builds
 dropshot = { version = "0.16.2", optional = true }

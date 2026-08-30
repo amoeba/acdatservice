@@ -2,7 +2,7 @@ use acprotocol::dat::reader::{
     dat_file_reader::DatFileReader, worker_r2_reader::WorkerR2RangeReader,
 };
 use counting_reader::CountingRangeReader;
-use routes::{dats_index, files_get, files_index, icons_get, icons_index, index_get};
+use routes::{dats_index, files_get, files_index, icons_get, icons_index, index_get, setups_get};
 use std::error::Error;
 use worker::*;
 
@@ -101,6 +101,7 @@ async fn fetch(req: Request, env: Env, _ctx: Context) -> Result<Response> {
     let files_index_url = url_string.clone();
     let files_get_url = url_string.clone();
     let icons_url = url_string.clone();
+    let setups_url = url_string.clone();
     let response = router
         .get_async("/", |_, ctx| index_get(ctx))
         .get_async("/dats", |_, ctx| dats_index(ctx))
@@ -113,6 +114,9 @@ async fn fetch(req: Request, env: Env, _ctx: Context) -> Result<Response> {
         .get_async("/icons", |_, ctx| icons_index(ctx))
         .get_async("/icons/:id", move |_, ctx| {
             icons_get(icons_url.clone(), ctx)
+        })
+        .get_async("/setups/:id", move |_, ctx| {
+            setups_get(setups_url.clone(), ctx)
         })
         .run(req, env)
         .await?;

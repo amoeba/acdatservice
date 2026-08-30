@@ -226,6 +226,56 @@ pub async fn index_get(_ctx: RouteContext<()>) -> Result<Response> {
         },
     );
     paths.insert(
+        "/setups/{id}".to_string(),
+        PathItem {
+            get: Some(Operation {
+                summary: "Get a portal DAT setup".to_string(),
+                description: "Returns the raw binary content of a Setup (0x02) resource from client_portal.dat. The id can be specified as a decimal number or as a hex string with a 0x or 0X prefix. Add ?include=gfxobjs to receive a multipart/mixed response whose first part is the setup and whose remaining parts are the distinct GraphicsObject (0x01) resources referenced by the setup.".to_string(),
+                operation_id: "setups_get".to_string(),
+                parameters: vec![
+                    Parameter {
+                        name: "id".to_string(),
+                        location: "path".to_string(),
+                        description: "Setup ID as decimal or hex (0x- or 0X-prefixed).".to_string(),
+                        required: true,
+                        schema: Schema::ObjectSchema {
+                            schema_type: "string".to_string(),
+                            default: None,
+                            minimum: None,
+                            maximum: None,
+                            format: None,
+                            min_length: None,
+                            max_length: None,
+                            read_only: None,
+                            description: None,
+                            properties: None,
+                            required: vec![],
+                        },
+                    },
+                    Parameter {
+                        name: "include".to_string(),
+                        location: "query".to_string(),
+                        description: "Optional related resources to include. Use gfxobjs to receive multipart/mixed containing the setup and its GraphicsObject parts.".to_string(),
+                        required: false,
+                        schema: Schema::ObjectSchema {
+                            schema_type: "string".to_string(),
+                            default: None,
+                            minimum: None,
+                            maximum: None,
+                            format: None,
+                            min_length: None,
+                            max_length: None,
+                            read_only: None,
+                            description: None,
+                            properties: None,
+                            required: vec![],
+                        },
+                    },
+                ],
+            }),
+        },
+    );
+    paths.insert(
         "/icons".to_string(),
         PathItem {
             get: Some(Operation {
@@ -671,6 +721,288 @@ pub async fn files_get(url: Url, ctx: RouteContext<()>) -> Result<Response> {
         .headers_mut()
         .set("X-R2-Read-Count", &read_count.to_string())?;
 
+    Ok(with_cors_headers(response))
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub(crate) enum SetupInclude {
+    None,
+    GfxObjs,
+}
+
+pub(crate) fn parse_setup_include(
+    value: Option<&str>,
+) -> std::result::Result<SetupInclude, String> {
+    match value {
+        None => Ok(SetupInclude::None),
+        Some("gfxobjs") => Ok(SetupInclude::GfxObjs),
+        Some(value) => Err(format!(
+            "Unsupported include {:?}. Omit include for the setup binary or use include=gfxobjs.",
+            value
+        )),
+    }
+}
+
+pub(crate) fn parse_setup_part_ids(
+    setup_id: u32,
+    setup_data: &[u8],
+) -> std::result::Result<Vec<u32>, String> {
+    const HEADER_SIZE: usize = 12;
+
+    if setup_data.len() < HEADER_SIZE {
+        return Err(format!(
+            "Setup {} (0x{:08X}) is too small to contain its header.",
+            setup_id, setup_id
+        ));
+    }
+
+    let encoded_setup_id = u32::from_le_bytes(setup_data[0..4].try_into().unwrap());
+    if encoded_setup_id != setup_id {
+        return Err(format!(
+            "Setup ID mismatch: requested {} (0x{:08X}) but the file contains {} (0x{:08X}).",
+            setup_id, setup_id, encoded_setup_id, encoded_setup_id
+        ));
+    }
+
+    let part_count = u32::from_le_bytes(setup_data[8..12].try_into().unwrap()) as usize;
+    let part_bytes = part_count
+        .checked_mul(std::mem::size_of::<u32>())
+        .ok_or_else(|| format!("Setup {} (0x{:08X}) has too many parts.", setup_id, setup_id))?;
+    let parts_end = HEADER_SIZE.checked_add(part_bytes).ok_or_else(|| {
+        format!(
+            "Setup {} (0x{:08X}) has an invalid parts section.",
+            setup_id, setup_id
+        )
+    })?;
+
+    if setup_data.len() < parts_end {
+        return Err(format!(
+            "Setup {} (0x{:08X}) declares {} parts but its data is truncated.",
+            setup_id, setup_id, part_count
+        ));
+    }
+
+    Ok((0..part_count)
+        .map(|index| {
+            let offset = HEADER_SIZE + index * std::mem::size_of::<u32>();
+            u32::from_le_bytes(setup_data[offset..offset + 4].try_into().unwrap())
+        })
+        .collect())
+}
+
+#[derive(Debug)]
+pub(crate) struct MultipartPart {
+    pub file_id: u32,
+    pub kind: &'static str,
+    pub data: Vec<u8>,
+}
+
+fn multipart_boundary(parts: &[MultipartPart]) -> String {
+    let root_id = parts.first().map(|part| part.file_id).unwrap_or_default();
+
+    for suffix in 0usize.. {
+        let candidate = format!("acdatservice-{:08X}-{}", root_id, suffix);
+        if !parts.iter().any(|part| {
+            part.data
+                .windows(candidate.len())
+                .any(|window| window == candidate.as_bytes())
+        }) {
+            return candidate;
+        }
+    }
+
+    unreachable!("a multipart boundary suffix is always available")
+}
+
+pub(crate) fn encode_multipart_mixed(parts: &[MultipartPart]) -> (String, Vec<u8>) {
+    let boundary = multipart_boundary(parts);
+    let mut body = Vec::new();
+
+    for part in parts {
+        body.extend_from_slice(
+            format!(
+                "--{boundary}\r\nContent-Type: application/octet-stream\r\nContent-ID: <0x{:08X}>\r\nContent-Disposition: attachment; filename=\"0x{:08X}.{}.bin\"\r\nContent-Location: /dats/portal/files/0x{:08X}\r\n\r\n",
+                part.file_id, part.file_id, part.kind, part.file_id
+            )
+            .as_bytes(),
+        );
+        body.extend_from_slice(&part.data);
+        body.extend_from_slice(b"\r\n");
+    }
+    body.extend_from_slice(format!("--{boundary}--\r\n").as_bytes());
+
+    (boundary, body)
+}
+
+async fn get_portal_files_by_ids(
+    ctx: &RouteContext<()>,
+    ids: &[u32],
+) -> Result<HashMap<u32, crate::db::File>> {
+    if ids.is_empty() {
+        return Ok(HashMap::new());
+    }
+
+    let placeholders = (2..=ids.len() + 1)
+        .map(|index| format!("?{index}"))
+        .collect::<Vec<_>>()
+        .join(", ");
+    let statement = ctx.d1("DATS_DB")?.prepare(format!(
+        "SELECT * FROM files WHERE database_type = ?1 AND id IN ({placeholders})"
+    ));
+    let mut values = Vec::with_capacity(ids.len() + 1);
+    values.push(D1Type::Integer(DatDatabaseType::Portal.as_u32() as i32));
+    values.extend(ids.iter().map(|id| D1Type::Integer(*id as i32)));
+
+    let results = statement.bind_refs(&values)?.all().await?;
+    let mut files = HashMap::new();
+    for file in results.results::<crate::db::File>()? {
+        let id = u32::try_from(file.id).map_err(|_| {
+            worker::Error::RustError(format!("D1 returned an invalid file ID {}.", file.id))
+        })?;
+        files.insert(id, file);
+    }
+
+    Ok(files)
+}
+
+pub async fn setups_get(url: Url, ctx: RouteContext<()>) -> Result<Response> {
+    const MAX_BUNDLE_FILE_BYTES: usize = 8 * 1024 * 1024;
+    const GFXOBJ_ID_RANGE: std::ops::RangeInclusive<u32> = 0x01000000..=0x0100FFFF;
+
+    let query_params: HashMap<_, _> = url.query_pairs().into_owned().collect();
+    let include = match parse_setup_include(query_params.get("include").map(String::as_str)) {
+        Ok(include) => include,
+        Err(message) => return Response::error(message, 400),
+    };
+
+    let param_id = match ctx.param("id") {
+        Some(value) => value,
+        None => return Response::error("Must specify setup ID.", 400),
+    };
+    let setup_id = match parse_file_id(param_id) {
+        Ok(value) => value,
+        Err(error) => return Response::error(error.to_string(), 400),
+    };
+
+    let setup_file = match get_file_by_id(&ctx, DatDatabaseType::Portal, setup_id).await? {
+        Some(file) if file.resolved_file_type() == DatFileType::Setup => file,
+        _ => {
+            return Response::error(
+                format!("Setup not found with ID {} (0x{:08X})", setup_id, setup_id),
+                404,
+            )
+        }
+    };
+    let (setup_data, mut read_count) = get_buf_for_file(&ctx, DatDatabaseType::Portal, &setup_file).await?;
+
+    if include == SetupInclude::None {
+        let mut response = Response::from_bytes(setup_data)?;
+        response
+            .headers_mut()
+            .set("Content-Type", "application/octet-stream")?;
+        response
+            .headers_mut()
+            .set("X-R2-Read-Count", &read_count.to_string())?;
+        return Ok(with_cors_headers(response));
+    }
+
+    let part_ids = match parse_setup_part_ids(setup_id, &setup_data) {
+        Ok(part_ids) => part_ids,
+        Err(message) => return Response::error(message, 422),
+    };
+    let mut gfxobj_ids = Vec::new();
+    for part_id in part_ids {
+        if part_id == 0 {
+            continue;
+        }
+        if !GFXOBJ_ID_RANGE.contains(&part_id) {
+            return Response::error(
+                format!(
+                    "Setup {} (0x{:08X}) references non-GraphicsObject part {} (0x{:08X}).",
+                    setup_id, setup_id, part_id, part_id
+                ),
+                422,
+            );
+        }
+        if !gfxobj_ids.contains(&part_id) {
+            gfxobj_ids.push(part_id);
+        }
+    }
+
+    let gfxobj_files = get_portal_files_by_ids(&ctx, &gfxobj_ids).await?;
+    let missing_or_invalid_ids: Vec<u32> = gfxobj_ids
+        .iter()
+        .copied()
+        .filter(|id| {
+            !matches!(
+                gfxobj_files.get(id),
+                Some(file) if file.resolved_file_type() == DatFileType::GraphicsObject
+            )
+        })
+        .collect();
+    if !missing_or_invalid_ids.is_empty() {
+        let ids = missing_or_invalid_ids
+            .iter()
+            .map(|id| format!("0x{id:08X}"))
+            .collect::<Vec<_>>()
+            .join(", ");
+        return Response::error(
+            format!(
+                "Setup 0x{:08X} has unavailable GraphicsObject dependencies: {}.",
+                setup_id, ids
+            ),
+            424,
+        );
+    }
+
+    let total_file_bytes = gfxobj_ids.iter().try_fold(
+        usize::try_from(setup_file.file_size).map_err(|_| {
+            worker::Error::RustError(format!("Setup 0x{setup_id:08X} has an invalid file size."))
+        })?,
+        |total, id| {
+            let file_size = usize::try_from(gfxobj_files[id].file_size).map_err(|_| {
+                worker::Error::RustError(format!("GraphicsObject 0x{id:08X} has an invalid file size."))
+            })?;
+            total.checked_add(file_size).ok_or_else(|| {
+                worker::Error::RustError("Setup bundle size overflowed usize.".to_string())
+            })
+        },
+    )?;
+    if total_file_bytes > MAX_BUNDLE_FILE_BYTES {
+        return Response::error(
+            format!(
+                "Setup bundle is {} bytes before multipart framing; the maximum is {} bytes.",
+                total_file_bytes, MAX_BUNDLE_FILE_BYTES
+            ),
+            413,
+        );
+    }
+
+    let mut multipart_parts = Vec::with_capacity(gfxobj_ids.len() + 1);
+    multipart_parts.push(MultipartPart {
+        file_id: setup_id,
+        kind: "setup",
+        data: setup_data,
+    });
+    for gfxobj_id in gfxobj_ids {
+        let (data, gfxobj_read_count) =
+            get_buf_for_file(&ctx, DatDatabaseType::Portal, &gfxobj_files[&gfxobj_id]).await?;
+        read_count += gfxobj_read_count;
+        multipart_parts.push(MultipartPart {
+            file_id: gfxobj_id,
+            kind: "gfxobj",
+            data,
+        });
+    }
+
+    let (boundary, bundle) = encode_multipart_mixed(&multipart_parts);
+    let mut response = Response::from_bytes(bundle)?;
+    response
+        .headers_mut()
+        .set("Content-Type", &format!("multipart/mixed; boundary={boundary}"))?;
+    response
+        .headers_mut()
+        .set("X-R2-Read-Count", &read_count.to_string())?;
     Ok(with_cors_headers(response))
 }
 

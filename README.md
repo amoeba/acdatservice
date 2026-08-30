@@ -8,7 +8,7 @@ Built with Cloudflare Workers, R2, and D1.
 | Route | Description | Example |
 |-------|-------------|---------|
 | [`/`](https://dats.treestats.net/) | OpenAPI specification | [`https://dats.treestats.net/`](https://dats.treestats.net/) |
-| [`/dats/:dat/files`](https://dats.treestats.net/dats/portal/files) | List all file IDs in a DAT | [`https://dats.treestats.net/dats/portal/files`](https://dats.treestats.net/dats/portal/files) |
+| [`/dats/:dat/files`](https://dats.treestats.net/dats/portal/files) | List file IDs in a DAT (paginated, default limit 10000) | [`https://dats.treestats.net/dats/portal/files?limit=100&offset=0`](https://dats.treestats.net/dats/portal/files?limit=100&offset=0) |
 | [`/dats/:dat/files/:file_id`](https://dats.treestats.net/dats/portal/files/16777217) | Get a file by ID from a DAT | [`https://dats.treestats.net/dats/portal/files/16777217`](https://dats.treestats.net/dats/portal/files/16777217) |
 | [`/icons`](https://dats.treestats.net/icons) | List all icon IDs | [`https://dats.treestats.net/icons`](https://dats.treestats.net/icons) |
 | [`/icons/:id`](https://dats.treestats.net/icons/26967) | Get icon as PNG | [`https://dats.treestats.net/icons/26967?scale=2`](https://dats.treestats.net/icons/26967?scale=2) |

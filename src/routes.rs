@@ -29,8 +29,8 @@ pub async fn index_get(_ctx: RouteContext<()>) -> Result<Response> {
         "/dats/{dat}/files".to_string(),
         PathItem {
             get: Some(Operation {
-                summary: "List all file IDs for a DAT".to_string(),
-                description: "Returns a newline-separated list of all file IDs in the requested DAT. Use 'portal' or 'cell' for the dat parameter.".to_string(),
+                summary: "List file IDs for a DAT".to_string(),
+                description: "Returns a newline-separated list of file IDs in the requested DAT. Use 'portal' or 'cell' for the dat parameter. Results are paginated; use ?limit and ?offset to page through large DATs.".to_string(),
                 operation_id: "files_index".to_string(),
                 parameters: vec![
                     Parameter {
@@ -42,6 +42,44 @@ pub async fn index_get(_ctx: RouteContext<()>) -> Result<Response> {
                             schema_type: "string".to_string(),
                             default: None,
                             minimum: None,
+                            maximum: None,
+                            format: None,
+                            min_length: None,
+                            max_length: None,
+                            read_only: None,
+                            description: None,
+                            properties: None,
+                            required: vec![],
+                        },
+                    },
+                    Parameter {
+                        name: "limit".to_string(),
+                        location: "query".to_string(),
+                        description: "Maximum number of files to return. Defaults to 10000, max 100000.".to_string(),
+                        required: false,
+                        schema: Schema::ObjectSchema {
+                            schema_type: "integer".to_string(),
+                            default: Some(serde_json::json!(10000)),
+                            minimum: Some(1),
+                            maximum: Some(100000),
+                            format: None,
+                            min_length: None,
+                            max_length: None,
+                            read_only: None,
+                            description: None,
+                            properties: None,
+                            required: vec![],
+                        },
+                    },
+                    Parameter {
+                        name: "offset".to_string(),
+                        location: "query".to_string(),
+                        description: "Number of files to skip. Defaults to 0.".to_string(),
+                        required: false,
+                        schema: Schema::ObjectSchema {
+                            schema_type: "integer".to_string(),
+                            default: Some(serde_json::json!(0)),
+                            minimum: Some(0),
                             maximum: None,
                             format: None,
                             min_length: None,
@@ -290,7 +328,9 @@ pub async fn index_get(_ctx: RouteContext<()>) -> Result<Response> {
     Ok(with_cors_headers(response))
 }
 
-pub async fn files_index(ctx: RouteContext<()>) -> Result<Response> {
+pub async fn files_index(url: Url, ctx: RouteContext<()>) -> Result<Response> {
+    let query_params: HashMap<_, _> = url.query_pairs().into_owned().collect();
+
     let param_dat = match ctx.param("dat") {
         Some(val) => val,
         None => return Response::error("Must specify DAT name.", 400),
@@ -301,11 +341,39 @@ pub async fn files_index(ctx: RouteContext<()>) -> Result<Response> {
         Err(err) => return Response::error(err.to_string(), 400),
     };
 
+    let limit = match query_params
+        .get("limit")
+        .map(|value| value.parse::<usize>())
+        .unwrap_or_else(|| Ok(10000))
+    {
+        Ok(val) => val,
+        Err(err) => return Response::error(format!("Invalid limit: {}", err), 400),
+    };
+
+    if limit == 0 || limit > 100000 {
+        return Response::error("limit must be between 1 and 100000", 400);
+    }
+
+    let offset = match query_params
+        .get("offset")
+        .map(|value| value.parse::<usize>())
+        .unwrap_or_else(|| Ok(0))
+    {
+        Ok(val) => val,
+        Err(err) => return Response::error(format!("Invalid offset: {}", err), 400),
+    };
+
     let db = ctx.d1("DATS_DB")?;
-    let statement = db.prepare("SELECT * FROM files WHERE database_type = ?1");
+    let statement = db.prepare("SELECT * FROM files WHERE database_type = ?1 LIMIT ?2 OFFSET ?3");
     // We cast to f64 to apparently work around JS
     let database_type_value = database_type.as_u32() as f64;
-    let query = statement.bind(&[database_type_value.into()])?;
+    let limit_value = limit as f64;
+    let offset_value = offset as f64;
+    let query = statement.bind(&[
+        database_type_value.into(),
+        limit_value.into(),
+        offset_value.into(),
+    ])?;
 
     let results = query.all().await?;
     let mut file_lines = Vec::new();
@@ -317,7 +385,11 @@ pub async fn files_index(ctx: RouteContext<()>) -> Result<Response> {
     }
 
     let response_text = file_lines.join("\n");
-    let response = Response::ok(response_text)?;
+    let mut response = Response::ok(response_text)?;
+    response.headers_mut().set("X-Limit", &limit.to_string())?;
+    response
+        .headers_mut()
+        .set("X-Offset", &offset.to_string())?;
     Ok(with_cors_headers(response))
 }
 

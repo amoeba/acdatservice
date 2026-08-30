@@ -45,13 +45,16 @@ async fn fetch(req: Request, env: Env, _ctx: Context) -> Result<Response> {
     let router = Router::new();
 
     let url_string = req.url()?;
-    let files_url = url_string.clone();
+    let files_index_url = url_string.clone();
+    let files_get_url = url_string.clone();
     let icons_url = url_string.clone();
     let response = router
         .get_async("/", |_, ctx| index_get(ctx))
-        .get_async("/dats/:dat/files", move |_, ctx| files_index(ctx))
+        .get_async("/dats/:dat/files", move |_, ctx| {
+            files_index(files_index_url.clone(), ctx)
+        })
         .get_async("/dats/:dat/files/:file_id", move |_, ctx| {
-            files_get(files_url.clone(), ctx)
+            files_get(files_get_url.clone(), ctx)
         })
         .get_async("/icons", |_, ctx| icons_index(ctx))
         .get_async("/icons/:id", move |_, ctx| {

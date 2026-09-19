@@ -4,7 +4,7 @@ use std::net::{Ipv4Addr, SocketAddr};
 
 use dropshot::{
     endpoint, ApiDescription, ConfigDropshot, ConfigLogging, ConfigLoggingLevel, HttpError,
-    HttpResponseOk, Path, RequestContext, ServerBuilder,
+    HttpResponseOk, Path, Query, RequestContext, ServerBuilder,
 };
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
@@ -51,7 +51,7 @@ async fn myapi_dats_get_dat_file(
     Ok(HttpResponseOk(dat_file))
 }
 
-#[derive(Serialize, JsonSchema)]
+#[derive(Debug, Serialize, JsonSchema)]
 struct FileEntry {
     id: i64,
     file_type: String,
@@ -64,11 +64,45 @@ struct FilesResponse {
     files: Vec<FileEntry>,
 }
 
+#[derive(Deserialize, JsonSchema)]
+struct FilesQuery {
+    /// Maximum number of records to return. Defaults to 1000; maximum is 1000.
+    limit: Option<usize>,
+    /// Number of records to skip. Use `after` for efficient sequential pagination.
+    offset: Option<usize>,
+    /// Return records with IDs greater than this value.
+    after: Option<u32>,
+}
+
 fn list_files_from_connection(
     connection: &sqlite::Connection,
+    query: &FilesQuery,
 ) -> Result<Vec<FileEntry>, Box<dyn std::error::Error>> {
-    let mut statement = connection.prepare(
-        "SELECT files.id,
+    const PAGE_SIZE: usize = 1000;
+    let limit = query.limit.unwrap_or(PAGE_SIZE);
+    if limit == 0 || limit > PAGE_SIZE {
+        return Err("limit must be between 1 and 1000".into());
+    }
+    let offset = query.offset.unwrap_or(0);
+
+    let mut statement = if query.after.is_some() {
+        connection.prepare(
+            "SELECT files.id,
+                COALESCE(file_types.name, printf('Unknown(%d)', files.file_type)),
+                COALESCE(file_subtypes.name, 'None'),
+                files.file_offset
+         FROM files
+         LEFT JOIN file_types ON file_types.id = files.file_type
+         LEFT JOIN file_subtypes
+           ON file_subtypes.id = files.file_subtype
+          AND file_subtypes.file_type_id = files.file_type
+         WHERE files.id > ?1
+         ORDER BY files.id ASC
+         LIMIT ?2",
+        )?
+    } else {
+        connection.prepare(
+            "SELECT files.id,
                 COALESCE(file_types.name, printf('Unknown(%d)', files.file_type)),
                 COALESCE(file_subtypes.name, 'None'),
                 files.file_offset
@@ -78,8 +112,17 @@ fn list_files_from_connection(
            ON file_subtypes.id = files.file_subtype
           AND file_subtypes.file_type_id = files.file_type
          ORDER BY files.id ASC
-         LIMIT 1024",
-    )?;
+         LIMIT ?1 OFFSET ?2",
+        )?
+    };
+
+    if let Some(after) = query.after {
+        statement.bind((1, after as i64))?;
+        statement.bind((2, limit as i64))?;
+    } else {
+        statement.bind((1, limit as i64))?;
+        statement.bind((2, offset as i64))?;
+    }
 
     let mut files = Vec::new();
     while let sqlite::State::Row = statement.next()? {
@@ -94,9 +137,9 @@ fn list_files_from_connection(
     Ok(files)
 }
 
-fn list_files() -> Result<Vec<FileEntry>, Box<dyn std::error::Error>> {
+fn list_files(query: &FilesQuery) -> Result<Vec<FileEntry>, Box<dyn std::error::Error>> {
     let connection = sqlite::open("./data/index.sqlite")?;
-    list_files_from_connection(&connection)
+    list_files_from_connection(&connection, query)
 }
 
 #[endpoint(
@@ -105,11 +148,12 @@ fn list_files() -> Result<Vec<FileEntry>, Box<dyn std::error::Error>> {
 )]
 async fn myapi_files_index(
     _rqctx: RequestContext<()>,
+    query: Query<FilesQuery>,
 ) -> Result<HttpResponseOk<FilesResponse>, HttpError> {
     // VERY WIP
     // TODO: Connect once? Maybe no need since this is fast.
 
-    match list_files() {
+    match list_files(&query.into_inner()) {
         Ok(files) => {
             let response = FilesResponse { files };
             Ok(HttpResponseOk(response))
@@ -238,7 +282,15 @@ mod tests {
             )
             .unwrap();
 
-        let files = list_files_from_connection(&connection).unwrap();
+        let files = list_files_from_connection(
+            &connection,
+            &FilesQuery {
+                limit: None,
+                offset: None,
+                after: None,
+            },
+        )
+        .unwrap();
 
         assert_eq!(files.len(), 2);
         assert_eq!(files[0].id, 1);
@@ -249,5 +301,60 @@ mod tests {
         assert_eq!(files[1].file_type, "Texture");
         assert_eq!(files[1].subtype, "Icon");
         assert_eq!(files[1].offset, 200);
+    }
+
+    #[test]
+    fn list_files_supports_limit_and_cursor_pagination() {
+        let connection = sqlite::open(":memory:").unwrap();
+        connection
+            .execute(
+                "CREATE TABLE files (
+                    id INTEGER NOT NULL,
+                    database_type INTEGER NOT NULL,
+                    file_type INTEGER NOT NULL,
+                    file_subtype INTEGER,
+                    file_offset INTEGER NOT NULL,
+                    file_size INTEGER NOT NULL
+                 );
+                 CREATE TABLE file_types (id INTEGER NOT NULL, name TEXT NOT NULL);
+                 CREATE TABLE file_subtypes (
+                    id INTEGER NOT NULL,
+                    file_type_id INTEGER,
+                    name TEXT NOT NULL
+                 );
+                 INSERT INTO files VALUES (1, 0, 999, NULL, 100, 10);
+                 INSERT INTO files VALUES (2, 0, 999, NULL, 200, 10);
+                 INSERT INTO files VALUES (3, 0, 999, NULL, 300, 10);",
+            )
+            .unwrap();
+
+        let files = list_files_from_connection(
+            &connection,
+            &FilesQuery {
+                limit: Some(1),
+                offset: None,
+                after: Some(1),
+            },
+        )
+        .unwrap();
+
+        assert_eq!(files.len(), 1);
+        assert_eq!(files[0].id, 2);
+    }
+
+    #[test]
+    fn list_files_rejects_page_sizes_over_maximum() {
+        let connection = sqlite::open(":memory:").unwrap();
+        let error = list_files_from_connection(
+            &connection,
+            &FilesQuery {
+                limit: Some(1001),
+                offset: None,
+                after: None,
+            },
+        )
+        .unwrap_err();
+
+        assert!(error.to_string().contains("between 1 and 1000"));
     }
 }

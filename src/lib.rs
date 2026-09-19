@@ -79,7 +79,7 @@ fn with_cors_headers(mut response: Response) -> Response {
     headers
         .set(
             "Access-Control-Expose-Headers",
-            "X-Limit, X-Offset, X-R2-Read-Count",
+            "X-Limit, X-Offset, X-Next-After, X-R2-Read-Count",
         )
         .ok();
     response
@@ -101,6 +101,7 @@ async fn fetch(req: Request, env: Env, _ctx: Context) -> Result<Response> {
     let files_index_url = url_string.clone();
     let files_get_url = url_string.clone();
     let icons_url = url_string.clone();
+    let icons_index_url = icons_url.clone();
     let setups_url = url_string.clone();
     let response = router
         .get_async("/", |_, ctx| index_get(ctx))
@@ -111,7 +112,7 @@ async fn fetch(req: Request, env: Env, _ctx: Context) -> Result<Response> {
         .get_async("/dats/:dat/files/:file_id", move |_, ctx| {
             files_get(files_get_url.clone(), ctx)
         })
-        .get_async("/icons", |_, ctx| icons_index(ctx))
+        .get_async("/icons", move |_, ctx| icons_index(icons_index_url.clone(), ctx))
         .get_async("/icons/:id", move |_, ctx| {
             icons_get(icons_url.clone(), ctx)
         })
@@ -179,7 +180,9 @@ pub async fn get_file_by_id(
     file_id: u32,
 ) -> Result<Option<db::File>> {
     let db = ctx.d1("DATS_DB")?;
-    let statement = db.prepare("SELECT * FROM files WHERE id = ?1 AND database_type = ?2 LIMIT 1");
+    let statement = db.prepare(
+        "SELECT id, database_type, file_type, file_subtype, file_offset, file_size FROM files WHERE id = ?1 AND database_type = ?2 LIMIT 1",
+    );
     // We cast to f64 to apparently work around JS
     let file_id_value = file_id as f64;
     let database_type_value = database_type.as_u32() as f64;

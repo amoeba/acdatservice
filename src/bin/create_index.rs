@@ -71,19 +71,20 @@ fn migrate(connection: &Connection) -> Result<(), Box<dyn std::error::Error>> {
             database_type INTEGER NOT NULL PRIMARY KEY,
             object_key TEXT NOT NULL,
             size_bytes INTEGER NOT NULL,
-            sha256 TEXT NOT NULL
+            sha256 TEXT NOT NULL,
+            file_count INTEGER NOT NULL DEFAULT 0
         )",
     )?;
 
     // Match the Worker queries for single-file lookups, deterministic DAT listings,
     // and portal icon listings.
     connection.execute(
-        "CREATE INDEX IF NOT EXISTS idx_files_database_type_id
-         ON files (database_type, id)",
+        "CREATE INDEX IF NOT EXISTS idx_files_database_type_id_covering
+         ON files (database_type, id, file_type, file_subtype, file_offset, file_size)",
     )?;
     connection.execute(
-        "CREATE INDEX IF NOT EXISTS idx_files_database_type_subtype_id
-         ON files (database_type, file_subtype, id)",
+        "CREATE INDEX IF NOT EXISTS idx_files_database_type_subtype_id_covering
+         ON files (database_type, file_subtype, id, file_type, file_offset, file_size)",
     )?;
 
     Ok(())
@@ -196,7 +197,7 @@ fn record_dat_metadata(
     let sha256 = sha256_file(dat_path)?;
 
     let mut statement = connection.prepare(
-        "INSERT OR REPLACE INTO dats (database_type, object_key, size_bytes, sha256) VALUES (?, ?, ?, ?)",
+        "INSERT OR REPLACE INTO dats (database_type, object_key, size_bytes, sha256, file_count) VALUES (?, ?, ?, ?, 0)",
     )?;
     statement.bind((1, database_type.as_u32() as i64))?;
     statement.bind((2, object_key.as_str()))?;
@@ -279,6 +280,12 @@ fn create_index(
         statement.next()?;
     }
 
+    connection.execute(&format!(
+        "UPDATE dats SET file_count = (SELECT COUNT(*) FROM files WHERE database_type = {}) WHERE database_type = {}",
+        database_type.as_u32(),
+        database_type.as_u32(),
+    ))?;
+
     Ok(())
 }
 
@@ -344,8 +351,8 @@ mod tests {
         assert_eq!(
             indexes,
             vec![
-                "idx_files_database_type_id",
-                "idx_files_database_type_subtype_id",
+                "idx_files_database_type_id_covering",
+                "idx_files_database_type_subtype_id_covering",
             ]
         );
     }

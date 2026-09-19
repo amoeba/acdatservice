@@ -30,6 +30,59 @@ pub(crate) enum FileResponseFormat {
     Json,
 }
 
+pub(crate) const DAT_ASSET_CACHE_CONTROL: &str =
+    "public, max-age=86400, s-maxage=604800, stale-while-revalidate=86400";
+pub(crate) const DEFAULT_PAGE_SIZE: usize = 1000;
+pub(crate) const MAX_PAGE_SIZE: usize = 1000;
+
+#[derive(Debug, Eq, PartialEq)]
+pub(crate) struct PaginationParams {
+    pub limit: usize,
+    pub offset: usize,
+    pub after: Option<u32>,
+}
+
+pub(crate) fn parse_pagination(
+    query_params: &HashMap<String, String>,
+) -> std::result::Result<PaginationParams, String> {
+    let limit = query_params
+        .get("limit")
+        .map(|value| value.parse::<usize>())
+        .unwrap_or_else(|| Ok(DEFAULT_PAGE_SIZE))
+        .map_err(|err| format!("Invalid limit: {}", err))?;
+    if limit == 0 || limit > MAX_PAGE_SIZE {
+        return Err(format!(
+            "limit must be between 1 and {}",
+            MAX_PAGE_SIZE
+        ));
+    }
+
+    let offset = query_params
+        .get("offset")
+        .map(|value| value.parse::<usize>())
+        .unwrap_or_else(|| Ok(0))
+        .map_err(|err| format!("Invalid offset: {}", err))?;
+
+    let after = query_params
+        .get("after")
+        .map(|value| value.parse::<u32>())
+        .transpose()
+        .map_err(|err| format!("Invalid after: {}", err))?;
+
+    Ok(PaginationParams {
+        limit,
+        offset,
+        after,
+    })
+}
+
+pub(crate) fn with_dat_asset_cache_headers(mut response: Response) -> Result<Response> {
+    response
+        .headers_mut()
+        .set("Cache-Control", DAT_ASSET_CACHE_CONTROL)?;
+    Ok(response)
+}
+
 pub(crate) fn parse_file_response_format(
     value: Option<&str>,
 ) -> std::result::Result<FileResponseFormat, String> {
@@ -44,17 +97,12 @@ pub(crate) fn parse_file_response_format(
 }
 
 #[derive(serde::Deserialize)]
-struct FileCountRow {
-    database_type: i64,
-    count: i64,
-}
-
-#[derive(serde::Deserialize)]
 struct DatMetadataRow {
     database_type: i64,
     object_key: String,
     size_bytes: i64,
     sha256: String,
+    file_count: i64,
 }
 
 #[derive(serde::Serialize)]
@@ -92,7 +140,7 @@ pub async fn index_get(_ctx: RouteContext<()>) -> Result<Response> {
         PathItem {
             get: Some(Operation {
                 summary: "List file metadata for a DAT".to_string(),
-                description: "Returns JSON Lines file metadata for the requested DAT. Use 'portal', 'cell', 'highres', or 'local_english' for the dat parameter. Results are ordered by file ID and paginated; use ?limit and ?offset to page through large DATs.".to_string(),
+                description: "Returns JSON Lines file metadata for the requested DAT. Use 'portal', 'cell', 'highres', or 'local_english' for the dat parameter. Results are ordered by file ID and paginated; pages default to 1000 records and are capped at 1000. For the next cursor, use the X-Next-After response header as the after value; offset is supported for compatibility.".to_string(),
                 operation_id: "files_index".to_string(),
                 parameters: vec![
                     Parameter {
@@ -117,13 +165,13 @@ pub async fn index_get(_ctx: RouteContext<()>) -> Result<Response> {
                     Parameter {
                         name: "limit".to_string(),
                         location: "query".to_string(),
-                        description: "Maximum number of files to return. Defaults to 10000, max 100000.".to_string(),
+                        description: "Maximum number of files to return. Defaults to 1000, max 1000.".to_string(),
                         required: false,
                         schema: Schema::ObjectSchema {
                             schema_type: "integer".to_string(),
-                            default: Some(serde_json::json!(10000)),
+                            default: Some(serde_json::json!(1000)),
                             minimum: Some(1),
-                            maximum: Some(100000),
+                            maximum: Some(1000),
                             format: None,
                             min_length: None,
                             max_length: None,
@@ -141,6 +189,25 @@ pub async fn index_get(_ctx: RouteContext<()>) -> Result<Response> {
                         schema: Schema::ObjectSchema {
                             schema_type: "integer".to_string(),
                             default: Some(serde_json::json!(0)),
+                            minimum: Some(0),
+                            maximum: None,
+                            format: None,
+                            min_length: None,
+                            max_length: None,
+                            read_only: None,
+                            description: None,
+                            properties: None,
+                            required: vec![],
+                        },
+                    },
+                    Parameter {
+                        name: "after".to_string(),
+                        location: "query".to_string(),
+                        description: "Return files with IDs greater than this value. More efficient than offset for sequential pagination.".to_string(),
+                        required: false,
+                        schema: Schema::ObjectSchema {
+                            schema_type: "integer".to_string(),
+                            default: None,
                             minimum: Some(0),
                             maximum: None,
                             format: None,
@@ -280,10 +347,67 @@ pub async fn index_get(_ctx: RouteContext<()>) -> Result<Response> {
         PathItem {
             get: Some(Operation {
                 summary: "List icon metadata".to_string(),
-                description: "Returns JSON Lines file metadata for all icon files in the database."
-                    .to_string(),
+                description: "Returns paginated JSON Lines file metadata for icon files. Pages default to 1000 records and are capped at 1000. For the next cursor, use the X-Next-After response header as the after value; offset is supported for compatibility.".to_string(),
                 operation_id: "icons_index".to_string(),
-                parameters: vec![],
+                parameters: vec![
+                    Parameter {
+                        name: "limit".to_string(),
+                        location: "query".to_string(),
+                        description: "Maximum number of icons to return. Defaults to 1000, max 1000.".to_string(),
+                        required: false,
+                        schema: Schema::ObjectSchema {
+                            schema_type: "integer".to_string(),
+                            default: Some(serde_json::json!(1000)),
+                            minimum: Some(1),
+                            maximum: Some(1000),
+                            format: None,
+                            min_length: None,
+                            max_length: None,
+                            read_only: None,
+                            description: None,
+                            properties: None,
+                            required: vec![],
+                        },
+                    },
+                    Parameter {
+                        name: "offset".to_string(),
+                        location: "query".to_string(),
+                        description: "Number of icons to skip. Defaults to 0.".to_string(),
+                        required: false,
+                        schema: Schema::ObjectSchema {
+                            schema_type: "integer".to_string(),
+                            default: Some(serde_json::json!(0)),
+                            minimum: Some(0),
+                            maximum: None,
+                            format: None,
+                            min_length: None,
+                            max_length: None,
+                            read_only: None,
+                            description: None,
+                            properties: None,
+                            required: vec![],
+                        },
+                    },
+                    Parameter {
+                        name: "after".to_string(),
+                        location: "query".to_string(),
+                        description: "Return icons with IDs greater than this value. More efficient than offset for sequential pagination.".to_string(),
+                        required: false,
+                        schema: Schema::ObjectSchema {
+                            schema_type: "integer".to_string(),
+                            default: None,
+                            minimum: Some(0),
+                            maximum: None,
+                            format: None,
+                            min_length: None,
+                            max_length: None,
+                            read_only: None,
+                            description: None,
+                            properties: None,
+                            required: vec![],
+                        },
+                    },
+                ],
             }),
         },
     );
@@ -444,19 +568,9 @@ pub async fn index_get(_ctx: RouteContext<()>) -> Result<Response> {
 pub async fn dats_index(ctx: RouteContext<()>) -> Result<Response> {
     let db = ctx.d1("DATS_DB")?;
 
-    // File counts per DAT
-    let count_statement =
-        db.prepare("SELECT database_type, COUNT(*) as count FROM files GROUP BY database_type");
-    let count_query = count_statement.bind(&[])?;
-    let count_results = count_query.all().await?;
-    let mut counts: HashMap<i64, i64> = HashMap::new();
-    for row in count_results.results::<FileCountRow>()? {
-        counts.insert(row.database_type, row.count);
-    }
-
-    // DAT metadata (size, sha256, object key)
+    // DAT metadata, including the precomputed file count.
     let meta_statement =
-        db.prepare("SELECT database_type, object_key, size_bytes, sha256 FROM dats");
+        db.prepare("SELECT database_type, object_key, size_bytes, sha256, file_count FROM dats");
     let meta_query = meta_statement.bind(&[])?;
     let meta_results = meta_query.all().await?;
     let mut metadata: HashMap<i64, DatMetadataRow> = HashMap::new();
@@ -468,7 +582,6 @@ pub async fn dats_index(ctx: RouteContext<()>) -> Result<Response> {
         name: &str,
         default_object_key: &str,
         database_type: DatDatabaseType,
-        counts: &HashMap<i64, i64>,
         metadata: &HashMap<i64, DatMetadataRow>,
     ) -> DatInfo {
         let db_type_value = database_type.as_u32() as i64;
@@ -478,7 +591,7 @@ pub async fn dats_index(ctx: RouteContext<()>) -> Result<Response> {
             object_key: meta
                 .map(|m| m.object_key.clone())
                 .unwrap_or_else(|| default_object_key.to_string()),
-            file_count: *counts.get(&db_type_value).unwrap_or(&0),
+            file_count: meta.map(|m| m.file_count).unwrap_or(0),
             size_bytes: meta.map(|m| m.size_bytes).unwrap_or(0),
             sha256: meta
                 .map(|m| m.sha256.clone())
@@ -491,28 +604,24 @@ pub async fn dats_index(ctx: RouteContext<()>) -> Result<Response> {
             "portal",
             "client_portal.dat",
             DatDatabaseType::Portal,
-            &counts,
             &metadata,
         ),
         cell: build_dat_info(
             "cell",
             "client_cell_1.dat",
             DatDatabaseType::Cell,
-            &counts,
             &metadata,
         ),
         highres: build_dat_info(
             "highres",
             "client_highres.dat",
             DatDatabaseType::Highres,
-            &counts,
             &metadata,
         ),
         local_english: build_dat_info(
             "local_english",
             "client_local_English.dat",
             DatDatabaseType::LocalEnglish,
-            &counts,
             &metadata,
         ),
     };
@@ -538,45 +647,46 @@ pub async fn files_index(url: Url, ctx: RouteContext<()>) -> Result<Response> {
         Err(err) => return Response::error(err.to_string(), 400),
     };
 
-    let limit = match query_params
-        .get("limit")
-        .map(|value| value.parse::<usize>())
-        .unwrap_or_else(|| Ok(10000))
-    {
-        Ok(val) => val,
-        Err(err) => return Response::error(format!("Invalid limit: {}", err), 400),
-    };
-
-    if limit == 0 || limit > 100000 {
-        return Response::error("limit must be between 1 and 100000", 400);
-    }
-
-    let offset = match query_params
-        .get("offset")
-        .map(|value| value.parse::<usize>())
-        .unwrap_or_else(|| Ok(0))
-    {
-        Ok(val) => val,
-        Err(err) => return Response::error(format!("Invalid offset: {}", err), 400),
+    let pagination = match parse_pagination(&query_params) {
+        Ok(value) => value,
+        Err(message) => return Response::error(message, 400),
     };
 
     let db = ctx.d1("DATS_DB")?;
-    let statement = db
-        .prepare("SELECT * FROM files WHERE database_type = ?1 ORDER BY id ASC LIMIT ?2 OFFSET ?3");
+    let file_columns = "id, database_type, file_type, file_subtype, file_offset, file_size";
+    let statement = if pagination.after.is_some() {
+        db.prepare(format!(
+            "SELECT {file_columns} FROM files WHERE database_type = ?1 AND id > ?2 ORDER BY id ASC LIMIT ?3"
+        ))
+    } else {
+        db.prepare(format!(
+            "SELECT {file_columns} FROM files WHERE database_type = ?1 ORDER BY id ASC LIMIT ?2 OFFSET ?3"
+        ))
+    };
     // We cast to f64 to apparently work around JS
     let database_type_value = database_type.as_u32() as f64;
-    let limit_value = limit as f64;
-    let offset_value = offset as f64;
-    let query = statement.bind(&[
-        database_type_value.into(),
-        limit_value.into(),
-        offset_value.into(),
-    ])?;
+    let limit_value = pagination.limit as f64;
+    let offset_value = pagination.offset as f64;
+    let query = if let Some(after_id) = pagination.after {
+        statement.bind(&[
+            database_type_value.into(),
+            (after_id as f64).into(),
+            limit_value.into(),
+        ])?
+    } else {
+        statement.bind(&[
+            database_type_value.into(),
+            limit_value.into(),
+            offset_value.into(),
+        ])?
+    };
 
     let results = query.all().await?;
     let mut file_lines = Vec::new();
+    let mut next_after = None;
 
     for result in results.results::<crate::db::File>()? {
+        next_after = Some(result.id);
         let response: crate::db::FileResponse = (&result).into();
         let json = serde_json::to_string(&response)?;
         file_lines.push(json);
@@ -587,27 +697,62 @@ pub async fn files_index(url: Url, ctx: RouteContext<()>) -> Result<Response> {
     response
         .headers_mut()
         .set("Content-Type", "application/x-ndjson; charset=utf-8")?;
-    response.headers_mut().set("X-Limit", &limit.to_string())?;
     response
         .headers_mut()
-        .set("X-Offset", &offset.to_string())?;
+        .set("X-Limit", &pagination.limit.to_string())?;
+    response
+        .headers_mut()
+        .set("X-Offset", &pagination.offset.to_string())?;
+    if let Some(next_after) = next_after {
+        response
+            .headers_mut()
+            .set("X-Next-After", &next_after.to_string())?;
+    }
     Ok(with_cors_headers(response))
 }
 
-pub async fn icons_index(ctx: RouteContext<()>) -> Result<Response> {
+pub async fn icons_index(url: Url, ctx: RouteContext<()>) -> Result<Response> {
+    let query_params: HashMap<_, _> = url.query_pairs().into_owned().collect();
+    let pagination = match parse_pagination(&query_params) {
+        Ok(value) => value,
+        Err(message) => return Response::error(message, 400),
+    };
     let db = ctx.d1("DATS_DB")?;
-    let statement = db.prepare(
-        "SELECT * FROM files WHERE database_type = ?1 AND file_subtype = ?2 ORDER BY id ASC",
-    );
+    let file_columns = "id, database_type, file_type, file_subtype, file_offset, file_size";
+    let statement = if pagination.after.is_some() {
+        db.prepare(format!(
+            "SELECT {file_columns} FROM files WHERE database_type = ?1 AND file_subtype = ?2 AND id > ?3 ORDER BY id ASC LIMIT ?4"
+        ))
+    } else {
+        db.prepare(format!(
+            "SELECT {file_columns} FROM files WHERE database_type = ?1 AND file_subtype = ?2 ORDER BY id ASC LIMIT ?3 OFFSET ?4"
+        ))
+    };
     // We cast to f64 to apparently work around JS
     let database_type = DatDatabaseType::Portal.as_u32() as f64;
     let icon_subtype = DatFileSubtype::Icon.as_u32() as f64;
-    let query = statement.bind(&[database_type.into(), icon_subtype.into()])?;
+    let query = if let Some(after_id) = pagination.after {
+        statement.bind(&[
+            database_type.into(),
+            icon_subtype.into(),
+            (after_id as f64).into(),
+            (pagination.limit as f64).into(),
+        ])?
+    } else {
+        statement.bind(&[
+            database_type.into(),
+            icon_subtype.into(),
+            (pagination.limit as f64).into(),
+            (pagination.offset as f64).into(),
+        ])?
+    };
 
     let results = query.all().await?;
     let mut icon_lines = Vec::new();
+    let mut next_after = None;
 
     for result in results.results::<crate::db::File>()? {
+        next_after = Some(result.id);
         let response: crate::db::FileResponse = (&result).into();
         let json = serde_json::to_string(&response)?;
         icon_lines.push(json);
@@ -618,6 +763,17 @@ pub async fn icons_index(ctx: RouteContext<()>) -> Result<Response> {
     response
         .headers_mut()
         .set("Content-Type", "application/x-ndjson; charset=utf-8")?;
+    response
+        .headers_mut()
+        .set("X-Limit", &pagination.limit.to_string())?;
+    response
+        .headers_mut()
+        .set("X-Offset", &pagination.offset.to_string())?;
+    if let Some(next_after) = next_after {
+        response
+            .headers_mut()
+            .set("X-Next-After", &next_after.to_string())?;
+    }
     Ok(with_cors_headers(response))
 }
 
@@ -721,7 +877,7 @@ pub async fn files_get(url: Url, ctx: RouteContext<()>) -> Result<Response> {
         .headers_mut()
         .set("X-R2-Read-Count", &read_count.to_string())?;
 
-    Ok(with_cors_headers(response))
+    Ok(with_cors_headers(with_dat_asset_cache_headers(response)?))
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -847,7 +1003,7 @@ async fn get_portal_files_by_ids(
         .collect::<Vec<_>>()
         .join(", ");
     let statement = ctx.d1("DATS_DB")?.prepare(format!(
-        "SELECT * FROM files WHERE database_type = ?1 AND id IN ({placeholders})"
+        "SELECT id, database_type, file_type, file_subtype, file_offset, file_size FROM files WHERE database_type = ?1 AND id IN ({placeholders})"
     ));
     let mut values = Vec::with_capacity(ids.len() + 1);
     values.push(D1Type::Integer(DatDatabaseType::Portal.as_u32() as i32));
@@ -903,7 +1059,7 @@ pub async fn setups_get(url: Url, ctx: RouteContext<()>) -> Result<Response> {
         response
             .headers_mut()
             .set("X-R2-Read-Count", &read_count.to_string())?;
-        return Ok(with_cors_headers(response));
+        return Ok(with_cors_headers(with_dat_asset_cache_headers(response)?));
     }
 
     let part_ids = match parse_setup_part_ids(setup_id, &setup_data) {
@@ -1003,7 +1159,7 @@ pub async fn setups_get(url: Url, ctx: RouteContext<()>) -> Result<Response> {
     response
         .headers_mut()
         .set("X-R2-Read-Count", &read_count.to_string())?;
-    Ok(with_cors_headers(response))
+    Ok(with_cors_headers(with_dat_asset_cache_headers(response)?))
 }
 
 pub async fn icons_get(url: Url, ctx: RouteContext<()>) -> Result<Response> {
@@ -1248,4 +1404,54 @@ pub async fn icons_get(url: Url, ctx: RouteContext<()>) -> Result<Response> {
         .headers_mut()
         .set("X-R2-Read-Count", &total_read_count.to_string())?;
     Ok(with_cors_headers(response))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn params(pairs: &[(&str, &str)]) -> HashMap<String, String> {
+        pairs
+            .iter()
+            .map(|(key, value)| ((*key).to_string(), (*value).to_string()))
+            .collect()
+    }
+
+    #[test]
+    fn pagination_defaults_to_uniform_page_size() {
+        assert_eq!(
+            parse_pagination(&HashMap::new()).unwrap(),
+            PaginationParams {
+                limit: 1000,
+                offset: 0,
+                after: None,
+            }
+        );
+    }
+
+    #[test]
+    fn pagination_accepts_maximum_and_cursor() {
+        assert_eq!(
+            parse_pagination(&params(&[("limit", "1000"), ("offset", "12"), ("after", "42")]))
+                .unwrap(),
+            PaginationParams {
+                limit: 1000,
+                offset: 12,
+                after: Some(42),
+            }
+        );
+    }
+
+    #[test]
+    fn pagination_rejects_zero_and_values_over_maximum() {
+        assert!(parse_pagination(&params(&[("limit", "0")])).is_err());
+        assert!(parse_pagination(&params(&[("limit", "1001")])).is_err());
+    }
+
+    #[test]
+    fn pagination_rejects_invalid_values() {
+        assert!(parse_pagination(&params(&[("limit", "nope")])).is_err());
+        assert!(parse_pagination(&params(&[("offset", "nope")])).is_err());
+        assert!(parse_pagination(&params(&[("after", "nope")])).is_err());
+    }
 }

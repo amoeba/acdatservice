@@ -872,8 +872,7 @@ pub async fn files_get(url: Url, ctx: RouteContext<()>) -> Result<Response> {
                     .await
                     .map_err(|e| {
                         worker::Error::RustError(format!("Failed to read object body: {}", e))
-                    })?
-                    .to_vec(),
+                    })?,
                 None => {
                     return Response::error(
                         format!(

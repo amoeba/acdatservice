@@ -10,7 +10,7 @@ Built with Cloudflare Workers, R2, and D1.
 | [`/`](https://dats.treestats.net/) | OpenAPI specification | [`https://dats.treestats.net/`](https://dats.treestats.net/) |
 | [`/dats`](https://dats.treestats.net/dats) | List available DATs with file counts, sizes, and sha256 hashes | [`https://dats.treestats.net/dats`](https://dats.treestats.net/dats) |
 | [`/dats/:dat/files`](https://dats.treestats.net/dats/portal/files) | List file metadata as JSON Lines (paginated, default and maximum limit 1000). DAT names: `portal`, `cell`, `highres`, `local_english` | [`https://dats.treestats.net/dats/portal/files?limit=100&offset=0`](https://dats.treestats.net/dats/portal/files?limit=100&offset=0) |
-| [`/dats/:dat/files/:file_id`](https://dats.treestats.net/dats/portal/files/16777217) | Get a file by ID from a DAT. File is served as a single static R2 object (no block-chain traversal, no D1). Add `?format=json` for a JSON representation of CharGen or SpellTable entries. | [`https://dats.treestats.net/dats/portal/files/16777217`](https://dats.treestats.net/dats/portal/files/16777217) |
+| [`/dats/:dat/files/:file_id`](https://dats.treestats.net/dats/portal/files/16777217) | Get a file by ID from a DAT. By default the file is served as a single static pre-extracted R2 object (no block-chain traversal, no D1). Add `?source=dat` to read the original DAT via D1 metadata and block-chain traversal instead, or `?format=json` for a JSON representation of CharGen or SpellTable entries. | [`https://dats.treestats.net/dats/portal/files/16777217`](https://dats.treestats.net/dats/portal/files/16777217) |
 | [`/icons`](https://dats.treestats.net/icons) | List icon metadata as paginated JSON Lines (default and maximum limit 1000) | [`https://dats.treestats.net/icons?limit=100&after=0`](https://dats.treestats.net/icons?limit=100&after=0) |
 | [`/icons/:id`](https://dats.treestats.net/icons/26967) | Get icon as PNG | [`https://dats.treestats.net/icons/26967?scale=2`](https://dats.treestats.net/icons/26967?scale=2) |
 | [`/setups/:id`](https://dats.treestats.net/setups/0x02000108) | Get a portal DAT Setup (0x02) by ID as raw binary, or a multipart/mixed bundle of the Setup and its GraphicsObject (0x01) dependencies via `?include=gfxobjs`. IDs accept decimal or hex (0x/0X) forms. Note: `fetch()` does not parse multipart/mixed responses automatically; consumers must parse the MIME boundary or use a MIME parser. | [`https://dats.treestats.net/setups/0x02000108`](https://dats.treestats.net/setups/0x02000108) |
@@ -46,7 +46,10 @@ Note that this crate must use the same version of the `worker` crate because of 
 
 The `/dats/:dat/files/:file_id` endpoint serves files from a pre-extracted R2 bucket
 (`treestats-acdats-extracted`) as individual flat objects. This avoids block-chain traversal
-on every request. To populate this bucket:
+on every request. Requests for files that have not been extracted and uploaded yet can opt
+back into the legacy behavior with `?source=dat`, which reads the original DAT using the D1
+index and block-chain traversal (and returns the `X-R2-Read-Count` header). To populate the
+extracted bucket:
 
 ### 1. Export each DAT locally using asheron-rs
 
@@ -76,7 +79,14 @@ This creates files like `export-portal/Texture/0x06006957.bin`, `export-portal/0
 ### 2. Upload to R2
 
 Flatten the file-type subdirectories into a single namespace per DAT and upload to the
-extracted bucket:
+extracted bucket. Create the bucket first if it does not exist:
+
+```sh
+npx wrangler r2 bucket create treestats-acdats-extracted
+```
+
+Then upload, flattening the file-type subdirectories (the helper below uses the R2 S3 API,
+so export your R2 access key, secret, and account endpoint first):
 
 ```sh
 # Flatten upload helper — strips the Texture/, CharGen/, SpellTable/ subdirectories

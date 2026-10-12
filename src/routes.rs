@@ -96,6 +96,26 @@ pub(crate) fn parse_file_response_format(
     }
 }
 
+/// Where `/dats/:dat/files/:file_id` reads the file bytes from.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub(crate) enum FileSource {
+    /// Pre-extracted flat object in the EXTRACTED_BUCKET (default).
+    Extracted,
+    /// Original DAT in DATS_BUCKET, via D1 metadata and block-chain traversal.
+    Dat,
+}
+
+pub(crate) fn parse_file_source(value: Option<&str>) -> std::result::Result<FileSource, String> {
+    match value {
+        None | Some("extracted") | Some("r2") => Ok(FileSource::Extracted),
+        Some("dat") | Some("legacy") => Ok(FileSource::Dat),
+        Some(value) => Err(format!(
+            "Unsupported source {:?}. Omit source for the pre-extracted R2 object, or use source=dat for block-chain traversal of the original DAT.",
+            value
+        )),
+    }
+}
+
 #[derive(serde::Deserialize)]
 struct DatMetadataRow {
     database_type: i64,
@@ -228,7 +248,7 @@ pub async fn index_get(_ctx: RouteContext<()>) -> Result<Response> {
         PathItem {
             get: Some(Operation {
                 summary: "Get a file by ID from a DAT".to_string(),
-                description: "Returns the raw binary content of a DAT file by its ID. The file_id can be specified as a decimal number (e.g., 16777217) or as a hex string with a 0x or 0X prefix (e.g., 0x1000001). Add ?format=json to request a JSON representation for file types that support it.".to_string(),
+                description: "Returns the raw binary content of a DAT file by its ID. By default the file is served from the pre-extracted R2 bucket as a single flat object. Pass ?source=dat to read the file from the original DAT via D1 metadata and block-chain traversal instead; use this for files that have not been extracted yet or to compare against the extracted copy. The file_id can be specified as a decimal number (e.g., 16777217) or as a hex string with a 0x or 0X prefix (e.g., 0x1000001). Add ?format=json to request a JSON representation for file types that support it.".to_string(),
                 operation_id: "files_get".to_string(),
                 parameters: vec![
                     Parameter {
@@ -277,6 +297,25 @@ pub async fn index_get(_ctx: RouteContext<()>) -> Result<Response> {
                         schema: Schema::ObjectSchema {
                             schema_type: "string".to_string(),
                             default: None,
+                            minimum: None,
+                            maximum: None,
+                            format: None,
+                            min_length: None,
+                            max_length: None,
+                            read_only: None,
+                            description: None,
+                            properties: None,
+                            required: vec![],
+                        },
+                    },
+                    Parameter {
+                        name: "source".to_string(),
+                        location: "query".to_string(),
+                        description: "Optional storage source. Omit or use 'extracted' to read the pre-extracted flat R2 object; use 'dat' to read the original DAT via D1 metadata and block-chain traversal (the legacy behavior, which also returns the X-R2-Read-Count response header).".to_string(),
+                        required: false,
+                        schema: Schema::ObjectSchema {
+                            schema_type: "string".to_string(),
+                            default: Some(serde_json::json!("extracted")),
                             minimum: None,
                             maximum: None,
                             format: None,
@@ -805,45 +844,81 @@ pub async fn files_get(url: Url, ctx: RouteContext<()>) -> Result<Response> {
             Err(message) => return Response::error(message, 400),
         };
 
-    // Read the file directly from the pre-extracted R2 bucket.
-    // Files are stored flat as {dat_name}/0x{file_id:08X}.bin, extracted by
-    // the asheron-rs CLI's `dat export --raw` command and uploaded to R2.
-    // This replaces the old D1 + block-chain traversal with a single R2 read.
-    let object_key = format!("{}/0x{:08X}.bin", database_type.name(), file_id);
-    let bucket = ctx.bucket("EXTRACTED_BUCKET")?;
+    let source = match parse_file_source(query_params.get("source").map(String::as_str)) {
+        Ok(value) => value,
+        Err(message) => return Response::error(message, 400),
+    };
 
-    let object = bucket.get(&object_key).execute().await.map_err(|e| {
-        worker::Error::RustError(format!("Failed to read from R2: {}", e))
-    })?;
+    // Default: read the file directly from the pre-extracted R2 bucket, stored
+    // flat as {dat_name}/0x{file_id:08X}.bin by the asheron-rs CLI's
+    // `dat export --raw` workflow. This replaces D1 + block-chain traversal
+    // with a single R2 read. `source=dat` opts back into the old behavior for
+    // files that have not been extracted/uploaded yet.
+    let (file_data, known_file_type, read_count) = match source {
+        FileSource::Extracted => {
+            let object_key = format!("{}/0x{:08X}.bin", database_type.name(), file_id);
+            let bucket = ctx.bucket("EXTRACTED_BUCKET")?;
 
-    let file_data = match object {
-        Some(obj) => obj
-            .body()
-            .ok_or_else(|| worker::Error::RustError("Empty object body".into()))?
-            .bytes()
-            .await
-            .map_err(|e| {
-                worker::Error::RustError(format!("Failed to read object body: {}", e))
-            })?
-            .to_vec(),
-        None => {
-            return Response::error(
-                format!("File not found with ID {} (0x{:X})", file_id, file_id),
-                404,
-            )
+            let object =
+                bucket.get(&object_key).execute().await.map_err(|e| {
+                    worker::Error::RustError(format!("Failed to read from R2: {}", e))
+                })?;
+
+            let data = match object {
+                Some(obj) => obj
+                    .body()
+                    .ok_or_else(|| worker::Error::RustError("Empty object body".into()))?
+                    .bytes()
+                    .await
+                    .map_err(|e| {
+                        worker::Error::RustError(format!("Failed to read object body: {}", e))
+                    })?
+                    .to_vec(),
+                None => {
+                    return Response::error(
+                        format!(
+                            "File not found with ID {} (0x{:X}) in the extracted bucket. Retry with source=dat to read it from the original DAT.",
+                            file_id, file_id
+                        ),
+                        404,
+                    )
+                }
+            };
+
+            (data, None, None)
+        }
+        FileSource::Dat => {
+            let file = match get_file_by_id(&ctx, database_type, file_id).await? {
+                Some(file) => file,
+                None => {
+                    return Response::error(
+                        format!("File not found with ID {} (0x{:X})", file_id, file_id),
+                        404,
+                    )
+                }
+            };
+            let file_type = file.resolved_file_type();
+            let (data, read_count) = get_buf_for_file(&ctx, database_type, &file).await?;
+
+            (data, Some(file_type), Some(read_count))
         }
     };
 
     if response_format == FileResponseFormat::Json {
-        // Need file type to know how to parse. Single cheap D1 query (no block reads).
-        let file_type = match get_file_by_id(&ctx, database_type, file_id).await? {
-            Some(f) => f.resolved_file_type(),
-            None => {
-                return Response::error(
-                    format!("File metadata not found for ID {} (0x{:X})", file_id, file_id),
-                    404,
-                )
-            }
+        // We need the file type to know how to parse. For source=extracted this
+        // is a single cheap D1 query (no block reads); for source=dat we already
+        // resolved it above.
+        let file_type = match known_file_type {
+            Some(file_type) => file_type,
+            None => match get_file_by_id(&ctx, database_type, file_id).await? {
+                Some(f) => f.resolved_file_type(),
+                None => {
+                    return Response::error(
+                        format!("File metadata not found for ID {} (0x{:X})", file_id, file_id),
+                        404,
+                    )
+                }
+            },
         };
 
         let json = match file_type {
@@ -890,6 +965,11 @@ pub async fn files_get(url: Url, ctx: RouteContext<()>) -> Result<Response> {
         response
             .headers_mut()
             .set("Content-Type", "application/json")?;
+        if let Some(read_count) = read_count {
+            response
+                .headers_mut()
+                .set("X-R2-Read-Count", &read_count.to_string())?;
+        }
         return Ok(with_cors_headers(response));
     }
 
@@ -897,6 +977,11 @@ pub async fn files_get(url: Url, ctx: RouteContext<()>) -> Result<Response> {
     response
         .headers_mut()
         .set("Content-Type", "application/octet-stream")?;
+    if let Some(read_count) = read_count {
+        response
+            .headers_mut()
+            .set("X-R2-Read-Count", &read_count.to_string())?;
+    }
 
     Ok(with_cors_headers(with_dat_asset_cache_headers(response)?))
 }

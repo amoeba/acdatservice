@@ -24,7 +24,7 @@ name = "dropshot_server"
 required-features = ["dropshot"]
 
 [dependencies]
-acprotocol = { package = "asheron-rs", git = "https://github.com/amoeba/asheron-rs", rev = "9e7d787959d8ad4890170fa36b973aa2c58b77f8", default-features = false, features = [
+acprotocol = { package = "asheron-rs", version = "0.2.0", default-features = false, features = [
   "dat-cloudflare",
   "dat-export",
 ] }

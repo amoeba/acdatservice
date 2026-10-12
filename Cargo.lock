@@ -145,8 +145,9 @@ dependencies = [
 
 [[package]]
 name = "asheron-rs"
-version = "0.1.1"
-source = "git+https://github.com/amoeba/asheron-rs?rev=9e7d787959d8ad4890170fa36b973aa2c58b77f8#9e7d787959d8ad4890170fa36b973aa2c58b77f8"
+version = "0.2.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "6843185639d2358847ab176e3e1759a42a32a090711a96563d9f152b930e5897"
 dependencies = [
  "anyhow",
  "bitflags",

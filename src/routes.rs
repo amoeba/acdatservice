@@ -805,8 +805,27 @@ pub async fn files_get(url: Url, ctx: RouteContext<()>) -> Result<Response> {
             Err(message) => return Response::error(message, 400),
         };
 
-    let file = match get_file_by_id(&ctx, database_type, file_id).await? {
-        Some(val) => val,
+    // Read the file directly from the pre-extracted R2 bucket.
+    // Files are stored flat as {dat_name}/0x{file_id:08X}.bin, extracted by
+    // the asheron-rs CLI's `dat export --raw` command and uploaded to R2.
+    // This replaces the old D1 + block-chain traversal with a single R2 read.
+    let object_key = format!("{}/0x{:08X}.bin", database_type.name(), file_id);
+    let bucket = ctx.bucket("EXTRACTED_BUCKET")?;
+
+    let object = bucket.get(&object_key).execute().await.map_err(|e| {
+        worker::Error::RustError(format!("Failed to read from R2: {}", e))
+    })?;
+
+    let file_data = match object {
+        Some(obj) => obj
+            .body()
+            .ok_or_else(|| worker::Error::RustError("Empty object body".into()))?
+            .bytes()
+            .await
+            .map_err(|e| {
+                worker::Error::RustError(format!("Failed to read object body: {}", e))
+            })?
+            .to_vec(),
         None => {
             return Response::error(
                 format!("File not found with ID {} (0x{:X})", file_id, file_id),
@@ -815,10 +834,18 @@ pub async fn files_get(url: Url, ctx: RouteContext<()>) -> Result<Response> {
         }
     };
 
-    let (file_data, read_count) = get_buf_for_file(&ctx, database_type, &file).await?;
-
     if response_format == FileResponseFormat::Json {
-        let file_type = file.resolved_file_type();
+        // Need file type to know how to parse. Single cheap D1 query (no block reads).
+        let file_type = match get_file_by_id(&ctx, database_type, file_id).await? {
+            Some(f) => f.resolved_file_type(),
+            None => {
+                return Response::error(
+                    format!("File metadata not found for ID {} (0x{:X})", file_id, file_id),
+                    404,
+                )
+            }
+        };
+
         let json = match file_type {
             DatFileType::CharGen | DatFileType::CharacterGenerator => {
                 let mut reader = Cursor::new(file_data.as_slice());
@@ -863,9 +890,6 @@ pub async fn files_get(url: Url, ctx: RouteContext<()>) -> Result<Response> {
         response
             .headers_mut()
             .set("Content-Type", "application/json")?;
-        response
-            .headers_mut()
-            .set("X-R2-Read-Count", &read_count.to_string())?;
         return Ok(with_cors_headers(response));
     }
 
@@ -873,9 +897,6 @@ pub async fn files_get(url: Url, ctx: RouteContext<()>) -> Result<Response> {
     response
         .headers_mut()
         .set("Content-Type", "application/octet-stream")?;
-    response
-        .headers_mut()
-        .set("X-R2-Read-Count", &read_count.to_string())?;
 
     Ok(with_cors_headers(with_dat_asset_cache_headers(response)?))
 }

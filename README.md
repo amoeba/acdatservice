@@ -66,54 +66,58 @@ To populate the extracted bucket:
 
 # Portal DAT (~65k+ files)
 cargo run --bin dat --features dat-export,dat-tokio -- export \
-  --file client_portal.dat --output export-portal/ --raw
+  --file client_portal.dat --output export/portal/ --raw
 
 # Cell DAT
 cargo run --bin dat --features dat-export,dat-tokio -- export \
-  --file client_cell_1.dat --output export-cell/ --raw
+  --file client_cell_1.dat --output export/cell/ --raw
 
 # High-res DAT
 cargo run --bin dat --features dat-export,dat-tokio -- export \
-  --file client_highres.dat --output export-highres/ --raw
+  --file client_highres.dat --output export/highres/ --raw
 
 # Local English DAT
 cargo run --bin dat --features dat-export,dat-tokio -- export \
-  --file client_local_English.dat --output export-local-english/ --raw
+  --file client_local_English.dat --output export/local_english/ --raw
 ```
 
-This creates files like `export-portal/Texture/0x06006957.bin`, `export-portal/0x02000108.bin`, etc.
+This creates files like `export/portal/0x02000108.bin`, `export/highres/0x060043BE.bin`, etc.
+
+Alternatively, `scripts/export_dats.sh` drives the `dat` CLI for you and writes to
+`export/<dat>/` (defaulting to all DATs, or pick one with e.g. `EXPORT_HIGHRES=1`).
 
 ### 2. Upload to R2
 
-Flatten the file-type subdirectories into a single namespace per DAT and upload to the
-extracted bucket. Create the bucket first if it does not exist:
+Mirror each `export/<dat>/` directory into the extracted bucket with
+`aws s3 sync --delete` — the rsync `--delete` equivalent. The bucket prefix
+becomes an exact mirror of the local export, so objects that no longer exist
+locally are removed. Create the bucket first if it does not exist:
 
 ```sh
 npx wrangler r2 bucket create treestats-acdats-extracted
 ```
 
-Then upload, flattening the file-type subdirectories (the helper below uses the R2 S3 API,
-so export your R2 access key, secret, and account endpoint first):
+Then mirror each DAT (uses the R2 S3 API, so export your R2 access key, secret,
+and account endpoint first):
 
 ```sh
-# Flatten upload helper — strips the Texture/, CharGen/, SpellTable/ subdirectories
-# so every file lands at <dat_name>/0x<id>.bin.
-upload_dat() {
-  local dat_name=$1
-  local export_dir=$2
-  for f in $(find "$export_dir" -name '*.bin'); do
-    base=$(basename "$f")
-    aws s3 cp "$f" "s3://treestats-acdats-extracted/$dat_name/$base" \
-      --endpoint-url <YOUR_R2_ENDPOINT> \
-      --content-type application/octet-stream
-  done
-}
+export AWS_ACCESS_KEY_ID=<token-id>
+export AWS_SECRET_ACCESS_KEY=<token-secret>
+export AWS_ENDPOINT_URL=https://<account-id>.r2.cloudflarestorage.com
 
-upload_dat portal   export-portal
-upload_dat cell     export-cell
-upload_dat highres  export-highres
-upload_dat local_english export-local-english
+for dat in portal cell highres local_english; do
+  aws s3 sync "export/$dat/" "s3://treestats-acdats-extracted/$dat/" \
+    --delete \
+    --endpoint-url "$AWS_ENDPOINT_URL" \
+    --region "${AWS_DEFAULT_REGION:-auto}" \
+    --content-type application/octet-stream \
+    --only-show-errors
+done
 ```
+
+Or run `scripts/upload_exported_dats.sh`, which does this with per-DAT selection
+and a `DRYRUN=1` preview. `--delete` requires an R2 token with Object Read &
+Write (ListBucket + DeleteObject).
 
 After upload, files are addressable at keys like `portal/0x06006957.bin`,
 `cell/0x01000001.bin`, etc. The Worker reads these directly with a single

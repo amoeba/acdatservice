@@ -116,6 +116,31 @@ pub(crate) fn parse_file_source(value: Option<&str>) -> std::result::Result<File
     }
 }
 
+/// HTTP status and message for a file that is absent from the extracted bucket.
+/// A miss is a hard error: the handler deliberately does not fall back to the
+/// original DAT. Callers opt into that path explicitly with `source=dat`.
+pub(crate) fn extracted_file_missing_error(file_id: u32) -> (u16, String) {
+    (
+        404,
+        format!(
+            "File not found with ID {} (0x{:08X}) in the extracted bucket. This endpoint does not fall back to the original DAT; retry with source=dat to read it from the DAT instead.",
+            file_id, file_id
+        ),
+    )
+}
+
+/// Resolve an extracted-bucket lookup into file bytes, or an HTTP error when the
+/// object is missing.
+pub(crate) fn resolve_extracted_file(
+    file_id: u32,
+    data: Option<Vec<u8>>,
+) -> std::result::Result<Vec<u8>, (u16, String)> {
+    match data {
+        Some(data) => Ok(data),
+        None => Err(extracted_file_missing_error(file_id)),
+    }
+}
+
 #[derive(serde::Deserialize)]
 struct DatMetadataRow {
     database_type: i64,
@@ -864,24 +889,21 @@ pub async fn files_get(url: Url, ctx: RouteContext<()>) -> Result<Response> {
                     worker::Error::RustError(format!("Failed to read from R2: {}", e))
                 })?;
 
-            let data = match object {
-                Some(obj) => obj
-                    .body()
-                    .ok_or_else(|| worker::Error::RustError("Empty object body".into()))?
-                    .bytes()
-                    .await
-                    .map_err(|e| {
-                        worker::Error::RustError(format!("Failed to read object body: {}", e))
-                    })?,
-                None => {
-                    return Response::error(
-                        format!(
-                            "File not found with ID {} (0x{:X}) in the extracted bucket. Retry with source=dat to read it from the original DAT.",
-                            file_id, file_id
-                        ),
-                        404,
-                    )
-                }
+            let loaded = match object {
+                Some(obj) => Some(
+                    obj.body()
+                        .ok_or_else(|| worker::Error::RustError("Empty object body".into()))?
+                        .bytes()
+                        .await
+                        .map_err(|e| {
+                            worker::Error::RustError(format!("Failed to read object body: {}", e))
+                        })?,
+                ),
+                None => None,
+            };
+            let data = match resolve_extracted_file(file_id, loaded) {
+                Ok(data) => data,
+                Err((status, message)) => return Response::error(message, status),
             };
 
             (data, None, None)

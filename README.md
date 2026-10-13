@@ -48,8 +48,9 @@ The `/dats/:dat/files/:file_id` endpoint serves files from a pre-extracted R2 bu
 (`treestats-acdats-extracted`) as individual flat objects. This avoids block-chain traversal
 on every request. Requests for files that have not been extracted and uploaded yet can opt
 back into the legacy behavior with `?source=dat`, which reads the original DAT using the D1
-index and block-chain traversal (and returns the `X-R2-Read-Count` header). To populate the
-extracted bucket:
+index and block-chain traversal (and returns the `X-R2-Read-Count` header). A missing extracted
+object is an HTTP `404` and is never resolved automatically from the original DAT. To populate
+the extracted bucket:
 
 ### 1. Export each DAT locally using asheron-rs
 

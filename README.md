@@ -49,8 +49,14 @@ The `/dats/:dat/files/:file_id` endpoint serves files from a pre-extracted R2 bu
 on every request. Requests for files that have not been extracted and uploaded yet can opt
 back into the legacy behavior with `?source=dat`, which reads the original DAT using the D1
 index and block-chain traversal (and returns the `X-R2-Read-Count` header). A missing extracted
-object is an HTTP `404` and is never resolved automatically from the original DAT. To populate
-the extracted bucket:
+object is an HTTP `404` and is never resolved automatically from the original DAT.
+
+Only `/dats/:dat/files/:file_id` reads from the extracted bucket. The other DAT-backed
+routes — `/setups/:id` and `/icons/:id` — intentionally remain on the D1 metadata +
+block-chain traversal path against the original DATs in `treestats-acdats`; they do not
+read from `treestats-acdats-extracted`.
+
+To populate the extracted bucket:
 
 ### 1. Export each DAT locally using asheron-rs
 

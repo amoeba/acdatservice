@@ -115,8 +115,9 @@ for dat in portal cell highres local_english; do
 done
 ```
 
-Or run `scripts/upload_exported_dats.sh`, which does this with per-DAT selection
-and a `DRYRUN=1` preview. `--delete` requires an R2 token with Object Read &
+Or run `scripts/upload_exported_dats.sh`, a thin wrapper that checks the R2
+environment and mirrors each non-empty `export/<dat>/` (`BUCKET` is required;
+preview with `DRYRUN=1`). `--delete` requires an R2 token with Object Read &
 Write (ListBucket + DeleteObject).
 
 After upload, files are addressable at keys like `portal/0x06006957.bin`,

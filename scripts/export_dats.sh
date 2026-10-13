@@ -281,7 +281,7 @@ if [ -z "${_EXPORT_DATS_SOURCED:-}" ]; then
   echo ""
   if ! $_export_failed; then
     echo "  Next step: upload to R2"
-    echo "    UPLOAD_DEFAULT=1 ./scripts/upload_exported_dats.sh"
+    echo "    ./scripts/upload_exported_dats.sh"
   fi
   echo "================================================"
 

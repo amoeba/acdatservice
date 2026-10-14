@@ -4,3 +4,5 @@ dist
 .wrangler
 data/*
 *.dat
+export-*/
+export/

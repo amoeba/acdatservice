@@ -10,7 +10,7 @@ Built with Cloudflare Workers, R2, and D1.
 | [`/`](https://dats.treestats.net/) | OpenAPI specification | [`https://dats.treestats.net/`](https://dats.treestats.net/) |
 | [`/dats`](https://dats.treestats.net/dats) | List available DATs with file counts, sizes, and sha256 hashes | [`https://dats.treestats.net/dats`](https://dats.treestats.net/dats) |
 | [`/dats/:dat/files`](https://dats.treestats.net/dats/portal/files) | List file metadata as JSON Lines (paginated, default and maximum limit 1000). DAT names: `portal`, `cell`, `highres`, `local_english` | [`https://dats.treestats.net/dats/portal/files?limit=100&offset=0`](https://dats.treestats.net/dats/portal/files?limit=100&offset=0) |
-| [`/dats/:dat/files/:file_id`](https://dats.treestats.net/dats/portal/files/16777217) | Get a file by ID from a DAT | [`https://dats.treestats.net/dats/portal/files/16777217`](https://dats.treestats.net/dats/portal/files/16777217) |
+| [`/dats/:dat/files/:file_id`](https://dats.treestats.net/dats/portal/files/16777217) | Get a file by ID from a DAT. By default the file is served as a single static pre-extracted R2 object (no block-chain traversal, no D1). Add `?source=dat` to read the original DAT via D1 metadata and block-chain traversal instead, or `?format=json` for a JSON representation of CharGen or SpellTable entries. | [`https://dats.treestats.net/dats/portal/files/16777217`](https://dats.treestats.net/dats/portal/files/16777217) |
 | [`/icons`](https://dats.treestats.net/icons) | List icon metadata as paginated JSON Lines (default and maximum limit 1000) | [`https://dats.treestats.net/icons?limit=100&after=0`](https://dats.treestats.net/icons?limit=100&after=0) |
 | [`/icons/:id`](https://dats.treestats.net/icons/26967) | Get icon as PNG | [`https://dats.treestats.net/icons/26967?scale=2`](https://dats.treestats.net/icons/26967?scale=2) |
 | [`/setups/:id`](https://dats.treestats.net/setups/0x02000108) | Get a portal DAT Setup (0x02) by ID as raw binary, or a multipart/mixed bundle of the Setup and its GraphicsObject (0x01) dependencies via `?include=gfxobjs`. IDs accept decimal or hex (0x/0X) forms. Note: `fetch()` does not parse multipart/mixed responses automatically; consumers must parse the MIME boundary or use a MIME parser. | [`https://dats.treestats.net/setups/0x02000108`](https://dats.treestats.net/setups/0x02000108) |
@@ -41,6 +41,88 @@ Development involves using the wrangler CLI and a Cloudflare account with the co
 I don't have a guide but please reach out if you'd like to contribute and want help.
 
 Note that this crate must use the same version of the `worker` crate because of type sharing with asheron-rs.
+
+## Pre-extracting Files to R2
+
+The `/dats/:dat/files/:file_id` endpoint serves files from a pre-extracted R2 bucket
+(`treestats-acdats-extracted`) as individual flat objects. This avoids block-chain traversal
+on every request. Requests for files that have not been extracted and uploaded yet can opt
+back into the legacy behavior with `?source=dat`, which reads the original DAT using the D1
+index and block-chain traversal (and returns the `X-R2-Read-Count` header). A missing extracted
+object is an HTTP `404` and is never resolved automatically from the original DAT.
+
+Only `/dats/:dat/files/:file_id` reads from the extracted bucket. The other DAT-backed
+routes — `/setups/:id` and `/icons/:id` — intentionally remain on the D1 metadata +
+block-chain traversal path against the original DATs in `treestats-acdats`; they do not
+read from `treestats-acdats-extracted`.
+
+To populate the extracted bucket:
+
+### 1. Export each DAT locally using asheron-rs
+
+```sh
+# Requires the asheron-rs repository with the dat-export and dat-tokio features.
+# See https://github.com/amoeba/asheron-rs
+
+# Portal DAT (~65k+ files)
+cargo run --bin dat --features dat-export,dat-tokio -- export \
+  --file client_portal.dat --output export/portal/ --raw
+
+# Cell DAT
+cargo run --bin dat --features dat-export,dat-tokio -- export \
+  --file client_cell_1.dat --output export/cell/ --raw
+
+# High-res DAT
+cargo run --bin dat --features dat-export,dat-tokio -- export \
+  --file client_highres.dat --output export/highres/ --raw
+
+# Local English DAT
+cargo run --bin dat --features dat-export,dat-tokio -- export \
+  --file client_local_English.dat --output export/local_english/ --raw
+```
+
+This creates files like `export/portal/0x02000108.bin`, `export/highres/0x060043BE.bin`, etc.
+
+Alternatively, `scripts/export_dats.sh` drives the `dat` CLI for you and writes to
+`export/<dat>/` (defaulting to all DATs, or pick one with e.g. `EXPORT_HIGHRES=1`).
+
+### 2. Upload to R2
+
+Mirror each `export/<dat>/` directory into the extracted bucket with
+`aws s3 sync --delete` — the rsync `--delete` equivalent. The bucket prefix
+becomes an exact mirror of the local export, so objects that no longer exist
+locally are removed. Create the bucket first if it does not exist:
+
+```sh
+npx wrangler r2 bucket create treestats-acdats-extracted
+```
+
+Then mirror each DAT (uses the R2 S3 API, so export your R2 access key, secret,
+and account endpoint first):
+
+```sh
+export AWS_ACCESS_KEY_ID=<token-id>
+export AWS_SECRET_ACCESS_KEY=<token-secret>
+export AWS_ENDPOINT_URL=https://<account-id>.r2.cloudflarestorage.com
+
+for dat in portal cell highres local_english; do
+  aws s3 sync "export/$dat/" "s3://treestats-acdats-extracted/$dat/" \
+    --delete \
+    --endpoint-url "$AWS_ENDPOINT_URL" \
+    --region "${AWS_DEFAULT_REGION:-auto}" \
+    --content-type application/octet-stream \
+    --only-show-errors
+done
+```
+
+Or run `scripts/upload_exported_dats.sh`, a thin wrapper that checks the R2
+environment and mirrors each non-empty `export/<dat>/` (`BUCKET` is required;
+preview with `DRYRUN=1`). `--delete` requires an R2 token with Object Read &
+Write (ListBucket + DeleteObject).
+
+After upload, files are addressable at keys like `portal/0x06006957.bin`,
+`cell/0x01000001.bin`, etc. The Worker reads these directly with a single
+`EXTRACTED_BUCKET.get(key)` — no block-chain traversal, no D1 query.
 
 ## Deployment
 

@@ -5,8 +5,9 @@ mod tests {
         db::File,
         parse_dat_param, parse_decimal_or_hex_string, parse_file_id,
         routes::{
-            encode_multipart_mixed, parse_file_response_format, parse_setup_include,
-            parse_setup_part_ids, FileResponseFormat, MultipartPart, SetupInclude,
+            encode_multipart_mixed, parse_file_response_format, parse_file_source,
+            parse_setup_include, parse_setup_part_ids, resolve_extracted_file, FileResponseFormat,
+            FileSource, MultipartPart, SetupInclude,
         },
         DatDatabaseType,
     };
@@ -126,6 +127,49 @@ mod tests {
         assert_eq!(
             error,
             "Unsupported format \"xml\". Omit format for binary data or use format=json for supported file types."
+        );
+    }
+
+    #[test]
+    fn test_parse_file_source_defaults_to_extracted_and_allows_dat() {
+        assert_eq!(parse_file_source(None).unwrap(), FileSource::Extracted);
+        assert_eq!(
+            parse_file_source(Some("extracted")).unwrap(),
+            FileSource::Extracted
+        );
+        assert_eq!(
+            parse_file_source(Some("r2")).unwrap(),
+            FileSource::Extracted
+        );
+        assert_eq!(parse_file_source(Some("dat")).unwrap(), FileSource::Dat);
+        assert_eq!(parse_file_source(Some("legacy")).unwrap(), FileSource::Dat);
+
+        let error = parse_file_source(Some("tape")).unwrap_err();
+        assert_eq!(
+            error,
+            "Unsupported source \"tape\". Omit source for the pre-extracted R2 object, or use source=dat for block-chain traversal of the original DAT."
+        );
+    }
+
+    #[test]
+    fn test_missing_extracted_file_is_http_error_without_fallback() {
+        // A miss in the extracted bucket is a hard HTTP error. The handler must
+        // not silently fall back to reading the original DAT.
+        let (status, message) = resolve_extracted_file(0x01000001, None).unwrap_err();
+        assert_eq!(status, 404);
+        assert!(
+            (400..=599).contains(&status),
+            "status {status} is not an HTTP error"
+        );
+        assert!(message.contains("0x01000001"), "{message}");
+        assert!(message.contains("does not fall back"), "{message}");
+        // The only recovery is an explicit opt-in, not an automatic fallback.
+        assert!(message.contains("source=dat"), "{message}");
+
+        // A hit is passed through unchanged.
+        assert_eq!(
+            resolve_extracted_file(0x01000001, Some(vec![1, 2, 3])).unwrap(),
+            vec![1, 2, 3]
         );
     }
 

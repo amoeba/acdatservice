@@ -11,6 +11,10 @@ command = "cargo install -q worker-build && worker-build --release"
 binding = 'DATS_BUCKET'
 bucket_name = 'treestats-acdats'
 
+[[r2_buckets]]
+binding = 'EXTRACTED_BUCKET'
+bucket_name = 'treestats-acdats-extracted'
+
 [[d1_databases]]
 binding = "DATS_DB"
 database_name = "dats"

@@ -35,6 +35,29 @@ Browsers can reuse an asset for one day. Shared caches may retain it for one wee
 the prior response for one additional day while refreshing it. The service intentionally does
 not mark these URLs `immutable`: publishing a new DAT can change bytes for an existing file ID.
 
+## Generating landblock bundles
+
+The `acdatservice` CLI turns the cell DAT into per-landblock **ACLB** bundle
+objects. Each bundle packs one landblock's files into a single self-describing
+blob, which collapses many tiny cell reads into one request per block. The
+byte-level format is documented in [`docs/bundle-format.md`](./docs/bundle-format.md).
+
+```sh
+# Terrain (…FFFF) + LandblockInfo (…FFFE), one file per landblock.
+DATS_DIR="$HOME/Dats" cargo run --bin acdatservice --features=generate -- \
+  generate landblock -o generated/
+
+# Every EnvCell (…01xx–…FExx), one file per landblock.
+DATS_DIR="$HOME/Dats" cargo run --bin acdatservice --features=generate -- \
+  generate envcell -o generated/
+```
+
+The DAT is read from `$DATS_DIR/client_cell_1.dat` (override with `--dat`).
+Output is one file per landblock named `0x<BLOCK>.landblock.bin` or
+`0x<BLOCK>.envcell.bin`, where `<BLOCK>` is the full four-digit uppercase hex
+landblock id (e.g. `0xB34A.envcell.bin`). Pass `--block 0xB34A` to generate a
+single block.
+
 ## Development
 
 Development involves using the wrangler CLI and a Cloudflare account with the correct resources setup.

@@ -23,11 +23,17 @@ required-features = ["index"]
 name = "dropshot_server"
 required-features = ["dropshot"]
 
+[[bin]]
+name = "acdatservice"
+path = "src/bin/acdatservice.rs"
+required-features = ["generate"]
+
 [dependencies]
 acprotocol = { package = "asheron-rs", version = "0.2.0", default-features = false, features = [
   "dat-cloudflare",
   "dat-export",
 ] }
+clap = { version = "4.5", features = ["derive"], optional = true }
 console_error_panic_hook = { version = "0.1.1" }
 # Optional dependencies for non-WASM builds
 dropshot = { version = "0.17.1", optional = true }
@@ -64,4 +70,5 @@ tokio = { version = "1", features = ["rt", "macros"] }
 [features]
 default = []
 dropshot = ["dep:dropshot", "dep:tokio", "dep:sqlite"]
+generate = ["dep:clap"]
 index = ["dep:sqlite", "dep:strum", "dep:sha2"]

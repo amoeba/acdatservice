@@ -70,6 +70,14 @@ impl FileType {
             FileType::Envcell => "envcell",
         }
     }
+
+    /// Subdirectory that mirrors the R2 prefix used by the bundle route.
+    fn collection(self) -> &'static str {
+        match self {
+            FileType::Landblock => "landblocks",
+            FileType::Envcell => "envcells",
+        }
+    }
 }
 
 fn main() -> Result<(), Box<dyn Error>> {
@@ -115,7 +123,8 @@ fn generate(args: GenerateArgs) -> Result<(), Box<dyn Error>> {
             .push((file.object_id, file.file_offset, file.file_size));
     }
 
-    fs::create_dir_all(&args.output)?;
+    let output_dir = args.output.join(args.file_type.collection());
+    fs::create_dir_all(&output_dir)?;
 
     let mut written = 0usize;
     for (block, mut files) in grouped {
@@ -133,7 +142,7 @@ fn generate(args: GenerateArgs) -> Result<(), Box<dyn Error>> {
             landblock: block,
             entries,
         };
-        let path = args.output.join(output_file_name(args.file_type, block));
+        let path = output_dir.join(output_file_name(block));
         fs::write(&path, bundle::encode(&bundle))?;
         written += 1;
     }
@@ -161,9 +170,9 @@ fn matches_file_type(file_type: FileType, object_id: u32) -> bool {
     }
 }
 
-/// Output file name for a bundle: full four-digit block hex plus its kind.
-fn output_file_name(file_type: FileType, block: u16) -> String {
-    format!("0x{block:04X}.{}.bin", file_type.name())
+/// Output file name for a bundle: full four-digit block hex.
+fn output_file_name(block: u16) -> String {
+    format!("0x{block:04X}.bin")
 }
 
 /// Resolve `client_cell_1.dat` from `--dat`, then `$DATS_DIR`, then `~/Dats`.
@@ -216,14 +225,14 @@ mod tests {
     }
 
     #[test]
-    fn output_names_include_full_block_hex_and_kind() {
-        assert_eq!(
-            output_file_name(FileType::Landblock, 0xB34A),
-            "0xB34A.landblock.bin"
-        );
-        assert_eq!(
-            output_file_name(FileType::Envcell, 0x00AE),
-            "0x00AE.envcell.bin"
-        );
+    fn output_names_use_full_block_hex() {
+        assert_eq!(output_file_name(0xB34A), "0xB34A.bin");
+        assert_eq!(output_file_name(0x00AE), "0x00AE.bin");
+    }
+
+    #[test]
+    fn collections_match_route_prefixes() {
+        assert_eq!(FileType::Landblock.collection(), "landblocks");
+        assert_eq!(FileType::Envcell.collection(), "envcells");
     }
 }

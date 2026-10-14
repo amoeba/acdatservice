@@ -200,9 +200,11 @@ DATS_DIR="$HOME/Dats" acdatservice generate envcell -o generated/
 DATS_DIR="$HOME/Dats" acdatservice generate envcell --block 0xB34A -o generated/
 ```
 
-Output files are named `0x<BLOCK>.landblock.bin` and `0x<BLOCK>.envcell.bin`,
-where `<BLOCK>` is the full four-digit uppercase hexadecimal landblock id
-(e.g. `0xB34A.envcell.bin`).
+Output files are written to `<out>/landblocks/0x<BLOCK>.bin` and
+`<out>/envcells/0x<BLOCK>.bin`, where `<BLOCK>` is the full four-digit uppercase
+hexadecimal landblock id (e.g. `envcells/0xB34A.bin`). The subdirectory mirrors
+the R2 prefix used by the `/dats/cell/landblocks` and `/dats/cell/envcells`
+routes.
 
 ## Versioning
 

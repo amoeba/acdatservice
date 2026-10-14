@@ -11,6 +11,8 @@ Built with Cloudflare Workers, R2, and D1.
 | [`/dats`](https://dats.treestats.net/dats) | List available DATs with file counts, sizes, and sha256 hashes | [`https://dats.treestats.net/dats`](https://dats.treestats.net/dats) |
 | [`/dats/:dat/files`](https://dats.treestats.net/dats/portal/files) | List file metadata as JSON Lines (paginated, default and maximum limit 1000). DAT names: `portal`, `cell`, `highres`, `local_english` | [`https://dats.treestats.net/dats/portal/files?limit=100&offset=0`](https://dats.treestats.net/dats/portal/files?limit=100&offset=0) |
 | [`/dats/:dat/files/:file_id`](https://dats.treestats.net/dats/portal/files/16777217) | Get a file by ID from a DAT. By default the file is served as a single static pre-extracted R2 object (no block-chain traversal, no D1). Add `?source=dat` to read the original DAT via D1 metadata and block-chain traversal instead, or `?format=json` for a JSON representation of CharGen or SpellTable entries. | [`https://dats.treestats.net/dats/portal/files/16777217`](https://dats.treestats.net/dats/portal/files/16777217) |
+| [`/dats/cell/landblocks/:block`](https://dats.treestats.net/dats/cell/landblocks/0xB34A) | Get the ACLB landblock bundle (terrain `…FFFF` + LandblockInfo `…FFFE`) for one landblock, served from the pre-extracted R2 bucket as `cell/landblocks/0x{block:04X}.bin`. `:block` accepts a 16-bit landblock id (`0xB34A`) or any full file id in the block (`0xB34AFFFF`). Only the cell DAT has bundles. | [`https://dats.treestats.net/dats/cell/landblocks/0xB34A`](https://dats.treestats.net/dats/cell/landblocks/0xB34A) |
+| [`/dats/cell/envcells/:block`](https://dats.treestats.net/dats/cell/envcells/0xB34A) | Get the ACLB EnvCell bundle for one landblock, served as `cell/envcells/0x{block:04X}.bin`. `:block` accepts a landblock id (`0xB34A`) or any full cell id in it (`0x1E3033D`). Only the cell DAT has bundles. | [`https://dats.treestats.net/dats/cell/envcells/0xB34A`](https://dats.treestats.net/dats/cell/envcells/0xB34A) |
 | [`/icons`](https://dats.treestats.net/icons) | List icon metadata as paginated JSON Lines (default and maximum limit 1000) | [`https://dats.treestats.net/icons?limit=100&after=0`](https://dats.treestats.net/icons?limit=100&after=0) |
 | [`/icons/:id`](https://dats.treestats.net/icons/26967) | Get icon as PNG | [`https://dats.treestats.net/icons/26967?scale=2`](https://dats.treestats.net/icons/26967?scale=2) |
 | [`/setups/:id`](https://dats.treestats.net/setups/0x02000108) | Get a portal DAT Setup (0x02) by ID as raw binary, or a multipart/mixed bundle of the Setup and its GraphicsObject (0x01) dependencies via `?include=gfxobjs`. IDs accept decimal or hex (0x/0X) forms. Note: `fetch()` does not parse multipart/mixed responses automatically; consumers must parse the MIME boundary or use a MIME parser. | [`https://dats.treestats.net/setups/0x02000108`](https://dats.treestats.net/setups/0x02000108) |
@@ -53,10 +55,13 @@ DATS_DIR="$HOME/Dats" cargo run --bin acdatservice --features=generate -- \
 ```
 
 The DAT is read from `$DATS_DIR/client_cell_1.dat` (override with `--dat`).
-Output is one file per landblock named `0x<BLOCK>.landblock.bin` or
-`0x<BLOCK>.envcell.bin`, where `<BLOCK>` is the full four-digit uppercase hex
-landblock id (e.g. `0xB34A.envcell.bin`). Pass `--block 0xB34A` to generate a
-single block.
+Output is one file per landblock, written to `<out>/landblocks/0x<BLOCK>.bin` or
+`<out>/envcells/0x<BLOCK>.bin`, where `<BLOCK>` is the full four-digit uppercase
+hex landblock id. The subdirectory mirrors the R2 prefix used by the
+`/dats/cell/landblocks/:block` and `/dats/cell/envcells/:block` routes, so
+`generate … -o export/cell` followed by syncing `export/cell/` publishes the
+bundles beside the per-id files in the extracted bucket. Pass `--block 0xB34A`
+to generate a single block.
 
 ## Development
 

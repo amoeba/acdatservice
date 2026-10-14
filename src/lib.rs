@@ -6,6 +6,7 @@ use routes::{dats_index, files_get, files_index, icons_get, icons_index, index_g
 use std::error::Error;
 use worker::*;
 
+pub mod bundle;
 mod counting_reader;
 mod db;
 mod generators;

@@ -1,13 +1,15 @@
 #[cfg(test)]
 mod tests {
     use crate::{
+        bundle::BundleKind,
         dat_block_size,
         db::File,
         parse_dat_param, parse_decimal_or_hex_string, parse_file_id,
         routes::{
-            encode_multipart_mixed, parse_file_response_format, parse_file_source,
-            parse_setup_include, parse_setup_part_ids, resolve_extracted_file, FileResponseFormat,
-            FileSource, MultipartPart, SetupInclude,
+            bundle_object_key, encode_multipart_mixed, parse_bundle_block,
+            parse_file_response_format, parse_file_source, parse_setup_include,
+            parse_setup_part_ids, resolve_extracted_file, FileResponseFormat, FileSource,
+            MultipartPart, SetupInclude,
         },
         DatDatabaseType,
     };
@@ -113,6 +115,37 @@ mod tests {
     }
 
     #[test]
+    fn test_parse_bundle_block_accepts_landblock_and_file_ids() {
+        assert_eq!(parse_bundle_block("0xB34A").unwrap(), 0xB34A);
+        assert_eq!(parse_bundle_block("45898").unwrap(), 0xB34A);
+        assert_eq!(parse_bundle_block("0xB34AFFFF").unwrap(), 0xB34A);
+        assert_eq!(parse_bundle_block("0x00AE0100").unwrap(), 0x00AE);
+        assert_eq!(parse_bundle_block("0x1E3033D").unwrap(), 0x01E3);
+    }
+
+    #[test]
+    fn test_parse_bundle_block_rejects_invalid_input() {
+        for input in ["", "nope", "0x100000000", "-1"] {
+            assert!(
+                parse_bundle_block(input).is_err(),
+                "expected {input:?} to be rejected"
+            );
+        }
+    }
+
+    #[test]
+    fn test_bundle_object_key_layout() {
+        assert_eq!(
+            bundle_object_key(BundleKind::Landblock, 0xB34A),
+            "cell/landblocks/0xB34A.bin"
+        );
+        assert_eq!(
+            bundle_object_key(BundleKind::Envcell, 0x00AE),
+            "cell/envcells/0x00AE.bin"
+        );
+    }
+
+    #[test]
     fn test_parse_file_response_format_requires_an_explicit_supported_format() {
         assert_eq!(
             parse_file_response_format(None).unwrap(),
@@ -200,7 +233,14 @@ mod tests {
 
     #[test]
     fn test_parse_setup_include_rejects_unknown_values() {
-        for input in ["", "GFXOBJS", "textures", "gfxobj", "gfxobjs,icons", " gfxobjs "] {
+        for input in [
+            "",
+            "GFXOBJS",
+            "textures",
+            "gfxobj",
+            "gfxobjs,icons",
+            " gfxobjs ",
+        ] {
             let error = parse_setup_include(Some(input)).unwrap_err();
             assert!(
                 error.contains("Unsupported include"),
@@ -232,7 +272,10 @@ mod tests {
         let part_b = 0x010008AC;
         let data = make_setup(setup_id, 0x0000_0001, &[part_a, part_b]);
 
-        assert_eq!(parse_setup_part_ids(setup_id, &data).unwrap(), vec![part_a, part_b]);
+        assert_eq!(
+            parse_setup_part_ids(setup_id, &data).unwrap(),
+            vec![part_a, part_b]
+        );
     }
 
     #[test]
@@ -308,7 +351,10 @@ mod tests {
         let setup_id = 0x02000108;
         let data = make_setup(setup_id, 0xDEAD_BEEF, &[]);
 
-        assert_eq!(parse_setup_part_ids(setup_id, &data).unwrap(), Vec::<u32>::new());
+        assert_eq!(
+            parse_setup_part_ids(setup_id, &data).unwrap(),
+            Vec::<u32>::new()
+        );
     }
 
     // ── encode_multipart_mixed ─────────────────────────────────────────
@@ -339,7 +385,9 @@ mod tests {
         expected.extend_from_slice(b"--acdatservice-02000108-0\r\n");
         expected.extend_from_slice(b"Content-Type: application/octet-stream\r\n");
         expected.extend_from_slice(b"Content-ID: <0x02000108>\r\n");
-        expected.extend_from_slice(b"Content-Disposition: attachment; filename=\"0x02000108.setup.bin\"\r\n");
+        expected.extend_from_slice(
+            b"Content-Disposition: attachment; filename=\"0x02000108.setup.bin\"\r\n",
+        );
         expected.extend_from_slice(b"Content-Location: /dats/portal/files/0x02000108\r\n");
         expected.extend_from_slice(b"\r\n");
         expected.extend_from_slice(&[0x01, 0x02, 0x03, 0x04]);
@@ -348,7 +396,9 @@ mod tests {
         expected.extend_from_slice(b"--acdatservice-02000108-0\r\n");
         expected.extend_from_slice(b"Content-Type: application/octet-stream\r\n");
         expected.extend_from_slice(b"Content-ID: <0x010008AB>\r\n");
-        expected.extend_from_slice(b"Content-Disposition: attachment; filename=\"0x010008AB.gfxobj.bin\"\r\n");
+        expected.extend_from_slice(
+            b"Content-Disposition: attachment; filename=\"0x010008AB.gfxobj.bin\"\r\n",
+        );
         expected.extend_from_slice(b"Content-Location: /dats/portal/files/0x010008AB\r\n");
         expected.extend_from_slice(b"\r\n");
         expected.extend_from_slice(&[0xFF, 0xFE, 0xFD]);
@@ -386,14 +436,23 @@ mod tests {
         let pos_1 = body_str.find("Content-ID: <0x02000108>").unwrap();
         let pos_2 = body_str.find("Content-ID: <0x010008AB>").unwrap();
         let pos_3 = body_str.find("Content-ID: <0x010008AC>").unwrap();
-        assert!(pos_1 < pos_2 && pos_2 < pos_3, "parts must preserve input order");
+        assert!(
+            pos_1 < pos_2 && pos_2 < pos_3,
+            "parts must preserve input order"
+        );
 
         // Each part's payload must appear after its own Content-ID header.
         let data_1 = body_str[pos_1..].find("\x01\x02\x03").unwrap() + pos_1;
         let data_2 = body_str[pos_2..].find("\x04\x05\x06").unwrap() + pos_2;
         let data_3 = body_str[pos_3..].find("\x07\x08\x09").unwrap() + pos_3;
-        assert!(data_1 < data_2 && data_2 < data_3, "data must preserve part order");
-        assert!(data_1 > pos_1 && data_2 > pos_2 && data_3 > pos_3, "data must follow its header");
+        assert!(
+            data_1 < data_2 && data_2 < data_3,
+            "data must preserve part order"
+        );
+        assert!(
+            data_1 > pos_1 && data_2 > pos_2 && data_3 > pos_3,
+            "data must follow its header"
+        );
     }
 
     #[test]

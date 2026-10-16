@@ -2,10 +2,14 @@ use acprotocol::dat::reader::{
     dat_file_reader::DatFileReader, worker_r2_reader::WorkerR2RangeReader,
 };
 use counting_reader::CountingRangeReader;
-use routes::{dats_index, files_get, files_index, icons_get, icons_index, index_get, setups_get};
+use routes::{
+    dats_index, envcells_get, files_get, files_index, icons_get, icons_index, index_get,
+    landblocks_get, setups_get,
+};
 use std::error::Error;
 use worker::*;
 
+pub mod bundle;
 mod counting_reader;
 mod db;
 mod generators;
@@ -112,7 +116,11 @@ async fn fetch(req: Request, env: Env, _ctx: Context) -> Result<Response> {
         .get_async("/dats/:dat/files/:file_id", move |_, ctx| {
             files_get(files_get_url.clone(), ctx)
         })
-        .get_async("/icons", move |_, ctx| icons_index(icons_index_url.clone(), ctx))
+        .get_async("/dats/:dat/landblocks/:block", |_, ctx| landblocks_get(ctx))
+        .get_async("/dats/:dat/envcells/:block", |_, ctx| envcells_get(ctx))
+        .get_async("/icons", move |_, ctx| {
+            icons_index(icons_index_url.clone(), ctx)
+        })
         .get_async("/icons/:id", move |_, ctx| {
             icons_get(icons_url.clone(), ctx)
         })

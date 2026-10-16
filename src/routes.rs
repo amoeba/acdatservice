@@ -6,6 +6,7 @@ use std::{collections::HashMap, fmt::Debug, io::Cursor};
 use worker::*;
 
 use crate::{
+    bundle::BundleKind,
     generators::icon::generate_icon,
     get_buf_for_file, get_file_by_id,
     openapi::{Contact, Info, OpenApiDocument, Operation, Parameter, PathItem, Schema, Server},
@@ -51,10 +52,7 @@ pub(crate) fn parse_pagination(
         .unwrap_or_else(|| Ok(DEFAULT_PAGE_SIZE))
         .map_err(|err| format!("Invalid limit: {}", err))?;
     if limit == 0 || limit > MAX_PAGE_SIZE {
-        return Err(format!(
-            "limit must be between 1 and {}",
-            MAX_PAGE_SIZE
-        ));
+        return Err(format!("limit must be between 1 and {}", MAX_PAGE_SIZE));
     }
 
     let offset = query_params
@@ -141,6 +139,27 @@ pub(crate) fn resolve_extracted_file(
     }
 }
 
+/// Parse a landblock identifier from a path segment.
+///
+/// Accepts a 16-bit landblock id (`0xB34A`, `45898`) or any full 32-bit DAT
+/// file id (`0xB34AFFFF`, `0x1E3033D`); for the latter the landblock is the
+/// high word. This lets both `/landblocks/0xB34A` and `/envcells/0x1E3033D`
+/// resolve to the right block.
+pub(crate) fn parse_bundle_block(text: &str) -> std::result::Result<u16, String> {
+    let value = parse_file_id(text).map_err(|error| error.to_string())?;
+    let block = if value > 0xFFFF { value >> 16 } else { value };
+    Ok(block as u16)
+}
+
+/// R2 object key for a bundle: `cell/{landblocks,envcells}/0x{block:04X}.bin`.
+pub(crate) fn bundle_object_key(kind: BundleKind, block: u16) -> String {
+    let collection = match kind {
+        BundleKind::Landblock => "landblocks",
+        BundleKind::Envcell => "envcells",
+    };
+    format!("cell/{collection}/0x{block:04X}.bin")
+}
+
 #[derive(serde::Deserialize)]
 struct DatMetadataRow {
     database_type: i64,
@@ -165,6 +184,29 @@ struct DatsResponse {
     cell: DatInfo,
     highres: DatInfo,
     local_english: DatInfo,
+}
+
+/// A required `string` parameter at the given path location.
+fn string_path_parameter(name: &str, description: &str) -> Parameter {
+    Parameter {
+        name: name.to_string(),
+        location: "path".to_string(),
+        description: description.to_string(),
+        required: true,
+        schema: Schema::ObjectSchema {
+            schema_type: "string".to_string(),
+            default: None,
+            minimum: None,
+            maximum: None,
+            format: None,
+            min_length: None,
+            max_length: None,
+            read_only: None,
+            description: None,
+            properties: None,
+            required: vec![],
+        },
+    }
 }
 
 pub async fn index_get(_ctx: RouteContext<()>) -> Result<Response> {
@@ -402,6 +444,40 @@ pub async fn index_get(_ctx: RouteContext<()>) -> Result<Response> {
                             required: vec![],
                         },
                     },
+                ],
+            }),
+        },
+    );
+    paths.insert(
+        "/dats/{dat}/landblocks/{block}".to_string(),
+        PathItem {
+            get: Some(Operation {
+                summary: "Get a landblock metadata bundle".to_string(),
+                description: "Returns the ACLB bundle for one landblock's terrain (…FFFF) and LandblockInfo (…FFFE) from the cell DAT. The block can be a 16-bit landblock id (0xB34A) or any full file id in the block (0xB34AFFFF); the high word is used. Bytes are served from the pre-extracted R2 bucket as cell/landblocks/0x{block:04X}.bin. Only the cell DAT has bundles.".to_string(),
+                operation_id: "landblocks_get".to_string(),
+                parameters: vec![
+                    string_path_parameter("dat", "DAT name. Only 'cell' has bundles."),
+                    string_path_parameter(
+                        "block",
+                        "Landblock id (0xB34A) or a full file id in the block (0xB34AFFFF).",
+                    ),
+                ],
+            }),
+        },
+    );
+    paths.insert(
+        "/dats/{dat}/envcells/{block}".to_string(),
+        PathItem {
+            get: Some(Operation {
+                summary: "Get an EnvCell bundle".to_string(),
+                description: "Returns the ACLB bundle containing every EnvCell owned by one landblock from the cell DAT. The block can be a landblock id (0xB34A) or any full cell id within it (0x1E3033D); the high word is used. Bytes are served from the pre-extracted R2 bucket as cell/envcells/0x{block:04X}.bin. Only the cell DAT has bundles.".to_string(),
+                operation_id: "envcells_get".to_string(),
+                parameters: vec![
+                    string_path_parameter("dat", "DAT name. Only 'cell' has bundles."),
+                    string_path_parameter(
+                        "block",
+                        "Landblock id (0xB34A) or any full file id in the block (0x1E3033D).",
+                    ),
                 ],
             }),
         },
@@ -935,7 +1011,10 @@ pub async fn files_get(url: Url, ctx: RouteContext<()>) -> Result<Response> {
                 Some(f) => f.resolved_file_type(),
                 None => {
                     return Response::error(
-                        format!("File metadata not found for ID {} (0x{:X})", file_id, file_id),
+                        format!(
+                            "File metadata not found for ID {} (0x{:X})",
+                            file_id, file_id
+                        ),
                         404,
                     )
                 }
@@ -1007,6 +1086,71 @@ pub async fn files_get(url: Url, ctx: RouteContext<()>) -> Result<Response> {
     Ok(with_cors_headers(with_dat_asset_cache_headers(response)?))
 }
 
+/// `GET /dats/cell/landblocks/{block}`: the ACLB landblock metadata bundle.
+pub async fn landblocks_get(ctx: RouteContext<()>) -> Result<Response> {
+    bundle_get(ctx, BundleKind::Landblock).await
+}
+
+/// `GET /dats/cell/envcells/{block}`: the ACLB EnvCell bundle.
+pub async fn envcells_get(ctx: RouteContext<()>) -> Result<Response> {
+    bundle_get(ctx, BundleKind::Envcell).await
+}
+
+/// Shared handler for the two bundle routes. Bundles live in the
+/// EXTRACTED_BUCKET beside the pre-extracted per-id files, under
+/// `cell/{landblocks,envcells}/0x{block:04X}.bin`.
+async fn bundle_get(ctx: RouteContext<()>, kind: BundleKind) -> Result<Response> {
+    let param_dat = match ctx.param("dat") {
+        Some(value) => value,
+        None => return Response::error("Must specify DAT name.", 400),
+    };
+    let (database_type, _) = match parse_dat_param(param_dat) {
+        Ok(value) => value,
+        Err(err) => return Response::error(err.to_string(), 400),
+    };
+    if database_type != DatDatabaseType::Cell {
+        return Response::error("Bundles are only available for the cell DAT.", 400);
+    }
+
+    let param_block = match ctx.param("block") {
+        Some(value) => value,
+        None => return Response::error("Must specify a landblock id.", 400),
+    };
+    let block = match parse_bundle_block(param_block) {
+        Ok(value) => value,
+        Err(message) => return Response::error(message, 400),
+    };
+
+    let object_key = bundle_object_key(kind, block);
+    let bucket = ctx.bucket("EXTRACTED_BUCKET")?;
+    let object =
+        bucket.get(&object_key).execute().await.map_err(|error| {
+            worker::Error::RustError(format!("Failed to read from R2: {error}"))
+        })?;
+    let Some(object) = object else {
+        return Response::error(
+            format!(
+                "No bundle at {object_key}. Generate it with `acdatservice generate` and upload it."
+            ),
+            404,
+        );
+    };
+    let bytes = object
+        .body()
+        .ok_or_else(|| worker::Error::RustError("Empty object body".into()))?
+        .bytes()
+        .await
+        .map_err(|error| {
+            worker::Error::RustError(format!("Failed to read object body: {error}"))
+        })?;
+
+    let mut response = Response::from_bytes(bytes)?;
+    response
+        .headers_mut()
+        .set("Content-Type", "application/octet-stream")?;
+    Ok(with_cors_headers(with_dat_asset_cache_headers(response)?))
+}
+
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub(crate) enum SetupInclude {
     None,
@@ -1050,7 +1194,12 @@ pub(crate) fn parse_setup_part_ids(
     let part_count = u32::from_le_bytes(setup_data[8..12].try_into().unwrap()) as usize;
     let part_bytes = part_count
         .checked_mul(std::mem::size_of::<u32>())
-        .ok_or_else(|| format!("Setup {} (0x{:08X}) has too many parts.", setup_id, setup_id))?;
+        .ok_or_else(|| {
+            format!(
+                "Setup {} (0x{:08X}) has too many parts.",
+                setup_id, setup_id
+            )
+        })?;
     let parts_end = HEADER_SIZE.checked_add(part_bytes).ok_or_else(|| {
         format!(
             "Setup {} (0x{:08X}) has an invalid parts section.",
@@ -1176,7 +1325,8 @@ pub async fn setups_get(url: Url, ctx: RouteContext<()>) -> Result<Response> {
             )
         }
     };
-    let (setup_data, mut read_count) = get_buf_for_file(&ctx, DatDatabaseType::Portal, &setup_file).await?;
+    let (setup_data, mut read_count) =
+        get_buf_for_file(&ctx, DatDatabaseType::Portal, &setup_file).await?;
 
     if include == SetupInclude::None {
         let mut response = Response::from_bytes(setup_data)?;
@@ -1244,7 +1394,9 @@ pub async fn setups_get(url: Url, ctx: RouteContext<()>) -> Result<Response> {
         })?,
         |total, id| {
             let file_size = usize::try_from(gfxobj_files[id].file_size).map_err(|_| {
-                worker::Error::RustError(format!("GraphicsObject 0x{id:08X} has an invalid file size."))
+                worker::Error::RustError(format!(
+                    "GraphicsObject 0x{id:08X} has an invalid file size."
+                ))
             })?;
             total.checked_add(file_size).ok_or_else(|| {
                 worker::Error::RustError("Setup bundle size overflowed usize.".to_string())
@@ -1280,9 +1432,10 @@ pub async fn setups_get(url: Url, ctx: RouteContext<()>) -> Result<Response> {
 
     let (boundary, bundle) = encode_multipart_mixed(&multipart_parts);
     let mut response = Response::from_bytes(bundle)?;
-    response
-        .headers_mut()
-        .set("Content-Type", &format!("multipart/mixed; boundary={boundary}"))?;
+    response.headers_mut().set(
+        "Content-Type",
+        &format!("multipart/mixed; boundary={boundary}"),
+    )?;
     response
         .headers_mut()
         .set("X-R2-Read-Count", &read_count.to_string())?;
@@ -1559,8 +1712,12 @@ mod tests {
     #[test]
     fn pagination_accepts_maximum_and_cursor() {
         assert_eq!(
-            parse_pagination(&params(&[("limit", "1000"), ("offset", "12"), ("after", "42")]))
-                .unwrap(),
+            parse_pagination(&params(&[
+                ("limit", "1000"),
+                ("offset", "12"),
+                ("after", "42")
+            ]))
+            .unwrap(),
             PaginationParams {
                 limit: 1000,
                 offset: 12,

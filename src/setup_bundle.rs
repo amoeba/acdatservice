@@ -585,6 +585,43 @@ mod tests {
         );
     }
 
+    #[test]
+    fn rejects_payload_overlap() {
+        let bundle = SetupBundle {
+            setup_id: 1,
+            entries: vec![present(0x0200_0001, &[1, 2]), present(0x0200_0002, &[3, 4])],
+        };
+        let mut encoded = encode(&bundle);
+        // Entry 1's offset lives at 16 + 12 + 4 = 32..36. Point it one byte back
+        // into entry 0's payload so the two ranges overlap (and leave a trailing
+        // byte), which must be rejected.
+        let payload_start = (HEADER_LEN + 2 * ENTRY_LEN) as u32;
+        encoded[32..36].copy_from_slice(&(payload_start + 1).to_le_bytes());
+        assert_eq!(
+            decode(&encoded),
+            Err(SetupBundleError::PayloadRangesDoNotTile)
+        );
+    }
+
+    #[test]
+    fn all_missing_entries_are_valid_and_reject_trailing_bytes() {
+        // Exercises the empty-ranges branch with count > 0 (no present payloads).
+        let bundle = SetupBundle {
+            setup_id: 1,
+            entries: vec![missing(0x0200_0001), missing(0x0200_0002)],
+        };
+        let encoded = encode(&bundle);
+        assert_eq!(encoded.len(), HEADER_LEN + 2 * ENTRY_LEN);
+        assert_eq!(decode(&encoded).unwrap(), bundle);
+
+        let mut with_trailing = encoded.clone();
+        with_trailing.push(0);
+        assert_eq!(
+            decode(&with_trailing),
+            Err(SetupBundleError::PayloadRangesDoNotTile)
+        );
+    }
+
     // Invariant 10.
     #[test]
     fn rejects_duplicate_ids() {

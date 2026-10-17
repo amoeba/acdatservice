@@ -77,10 +77,10 @@ so generation is a TypeScript tool in that repo:
 
 ```sh
 # In ac-noclip. Writes <out>/portal/setups/0x{id:08X}.bin for every renderable Setup.
-DATS_DIR="$HOME/Dats" npx tsx scripts/gen-setup-packs.ts -o export
+DATS_DIR="$HOME/Dats" npx tsx scripts/gen-setup-packs.ts --out=export
 # One Setup, or the first N of the catalog.
-DATS_DIR="$HOME/Dats" npx tsx scripts/gen-setup-packs.ts --id=0x02001B7F -o export
-DATS_DIR="$HOME/Dats" npx tsx scripts/gen-setup-packs.ts --limit=100 -o export
+DATS_DIR="$HOME/Dats" npx tsx scripts/gen-setup-packs.ts --id=0x02001B7F --out=export
+DATS_DIR="$HOME/Dats" npx tsx scripts/gen-setup-packs.ts --limit=100 --out=export
 ```
 
 The output subdirectory mirrors the R2 prefix, so syncing `export/portal/setups/`

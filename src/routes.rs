@@ -1379,7 +1379,7 @@ pub async fn setups_bundle_get(ctx: RouteContext<()>) -> Result<Response> {
     let Some(object) = object else {
         return Response::error(
             format!(
-                "No setup pack at {key}. Generate it with scripts/gen-setup-packs.ts and upload it to the extracted bucket."
+                "No setup pack at {key}. Generate it with the ac-noclip scripts/gen-setup-packs.ts tool and upload it to the extracted bucket."
             ),
             404,
         );

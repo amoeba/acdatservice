@@ -195,7 +195,7 @@ let bundle = SetupBundle {
         SetupEntry { id: 0x0600_0000, data: None }, // known missing
     ],
 };
-let bytes = encode(&bundle);
+let bytes = encode(&bundle)?;
 let parsed = decode(&bytes)?;
 
 // None       = id absent from the bundle

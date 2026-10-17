@@ -67,15 +67,24 @@ impl SetupBundle {
     }
 
     /// Total encoded size in bytes.
-    pub fn encoded_len(&self) -> usize {
-        HEADER_LEN
-            + self.entries.len() * ENTRY_LEN
-            + self
-                .entries
-                .iter()
-                .filter_map(|entry| entry.data.as_ref())
-                .map(|data| data.len())
-                .sum::<usize>()
+    ///
+    /// Returns [`SetupBundleError::SizeOverflow`] if the entry table or the
+    /// summed payload lengths overflow `usize`.
+    pub fn encoded_len(&self) -> Result<usize, SetupBundleError> {
+        let table_len = self
+            .entries
+            .len()
+            .checked_mul(ENTRY_LEN)
+            .ok_or(SetupBundleError::SizeOverflow)?;
+        let mut total = HEADER_LEN
+            .checked_add(table_len)
+            .ok_or(SetupBundleError::SizeOverflow)?;
+        for data in self.entries.iter().filter_map(|entry| entry.data.as_ref()) {
+            total = total
+                .checked_add(data.len())
+                .ok_or(SetupBundleError::SizeOverflow)?;
+        }
+        Ok(total)
     }
 }
 
@@ -92,7 +101,9 @@ pub enum SetupBundleError {
     UnknownKind(u8),
     /// A reserved field was not zero.
     ReservedNotZero(u16),
-    /// `count * ENTRY_LEN` (or a payload end) overflowed `usize`.
+    /// A size or offset did not fit: the entry table or summed payloads
+    /// overflowed `usize`, or the entry count / an absolute offset exceeded
+    /// its `u32` field.
     SizeOverflow,
     /// The entry table runs past the end of the input.
     TruncatedTable { count: u32, available: usize },
@@ -104,6 +115,8 @@ pub enum SetupBundleError {
     },
     /// A present payload offset points into the header or entry table.
     PayloadBeforeTable { id: u32, offset: usize },
+    /// A present payload's length does not fit in the `u32` length field.
+    EntryTooLarge { id: u32, len: usize },
     /// Payload ranges contain a gap, an overlap, or trailing bytes.
     PayloadRangesDoNotTile,
     /// The same id appears more than once.
@@ -150,6 +163,12 @@ impl fmt::Display for SetupBundleError {
                 f,
                 "payload for entry 0x{id:08X} starts at {offset}, before the payload region"
             ),
+            SetupBundleError::EntryTooLarge { id, len } => {
+                write!(
+                    f,
+                    "setup bundle entry 0x{id:08X} is too large ({len} bytes)"
+                )
+            }
             SetupBundleError::PayloadRangesDoNotTile => {
                 write!(f, "payload ranges do not tile the payload region exactly")
             }
@@ -166,18 +185,31 @@ impl Error for SetupBundleError {}
 /// absolute offsets are recorded in the entry table. Entries with
 /// `data == None` are written as known-missing markers and contribute no
 /// payload. Callers are expected to sort entries by id first.
-pub fn encode(bundle: &SetupBundle) -> Vec<u8> {
-    let count = bundle.entries.len();
-    let mut out = Vec::with_capacity(bundle.encoded_len());
+///
+/// Returns [`SetupBundleError::SizeOverflow`] if the encoding overflows
+/// `usize` or the entry count does not fit in `u32`, and
+/// [`SetupBundleError::EntryTooLarge`] if a payload does not fit in the
+/// `u32` length field.
+pub fn encode(bundle: &SetupBundle) -> Result<Vec<u8>, SetupBundleError> {
+    let total = bundle.encoded_len()?;
+    let count = u32::try_from(bundle.entries.len()).map_err(|_| SetupBundleError::SizeOverflow)?;
+    let table_len = bundle
+        .entries
+        .len()
+        .checked_mul(ENTRY_LEN)
+        .ok_or(SetupBundleError::SizeOverflow)?;
+    let mut out = Vec::with_capacity(total);
 
     out.extend_from_slice(&MAGIC.to_le_bytes());
     out.push(VERSION);
     out.push(SETUP_KIND);
     out.extend_from_slice(&0u16.to_le_bytes());
     out.extend_from_slice(&bundle.setup_id.to_le_bytes());
-    out.extend_from_slice(&(count as u32).to_le_bytes());
+    out.extend_from_slice(&count.to_le_bytes());
 
-    let mut payload_at = HEADER_LEN + count * ENTRY_LEN;
+    let mut payload_at = HEADER_LEN
+        .checked_add(table_len)
+        .ok_or(SetupBundleError::SizeOverflow)?;
     for entry in &bundle.entries {
         out.extend_from_slice(&entry.id.to_le_bytes());
         match &entry.data {
@@ -186,9 +218,18 @@ pub fn encode(bundle: &SetupBundle) -> Vec<u8> {
                 out.extend_from_slice(&MISSING.to_le_bytes());
             }
             Some(data) => {
-                out.extend_from_slice(&(payload_at as u32).to_le_bytes());
-                out.extend_from_slice(&(data.len() as u32).to_le_bytes());
-                payload_at += data.len();
+                let len =
+                    u32::try_from(data.len()).map_err(|_| SetupBundleError::EntryTooLarge {
+                        id: entry.id,
+                        len: data.len(),
+                    })?;
+                let offset =
+                    u32::try_from(payload_at).map_err(|_| SetupBundleError::SizeOverflow)?;
+                out.extend_from_slice(&offset.to_le_bytes());
+                out.extend_from_slice(&len.to_le_bytes());
+                payload_at = payload_at
+                    .checked_add(data.len())
+                    .ok_or(SetupBundleError::SizeOverflow)?;
             }
         }
     }
@@ -198,7 +239,7 @@ pub fn encode(bundle: &SetupBundle) -> Vec<u8> {
         }
     }
 
-    out
+    Ok(out)
 }
 
 /// Decode a setup bundle, validating every field and bound.
@@ -373,7 +414,7 @@ mod tests {
     #[test]
     fn roundtrips_present_and_missing_entries() {
         let bundle = sample_bundle();
-        let decoded = decode(&encode(&bundle)).unwrap();
+        let decoded = decode(&encode(&bundle).unwrap()).unwrap();
         assert_eq!(decoded, bundle);
     }
 
@@ -383,14 +424,14 @@ mod tests {
             setup_id: 0,
             entries: Vec::new(),
         };
-        let encoded = encode(&bundle);
+        let encoded = encode(&bundle).unwrap();
         assert_eq!(encoded.len(), HEADER_LEN);
         assert_eq!(decode(&encoded).unwrap(), bundle);
     }
 
     #[test]
     fn header_layout_is_little_endian() {
-        let encoded = encode(&sample_bundle());
+        let encoded = encode(&sample_bundle()).unwrap();
 
         assert_eq!(&encoded[0..4], b"ACSP");
         assert_eq!(encoded[4], VERSION);
@@ -436,7 +477,7 @@ mod tests {
             0xDE, 0xAD,             // entry 0 payload
         ];
 
-        assert_eq!(encode(&bundle), expected);
+        assert_eq!(encode(&bundle).unwrap(), expected);
         assert_eq!(decode(&expected).unwrap(), bundle);
     }
 
@@ -465,8 +506,23 @@ mod tests {
                 entries: Vec::new(),
             },
         ] {
-            assert_eq!(bundle.encoded_len(), encode(&bundle).len());
+            assert_eq!(
+                bundle.encoded_len().unwrap(),
+                encode(&bundle).unwrap().len()
+            );
         }
+    }
+
+    #[test]
+    fn entry_too_large_display() {
+        let message = SetupBundleError::EntryTooLarge {
+            id: 0x0200_0001,
+            len: 5,
+        }
+        .to_string();
+        assert!(message.contains("0x02000001"), "got {message:?}");
+        assert!(message.contains("too large"), "got {message:?}");
+        assert!(message.contains("5 bytes"), "got {message:?}");
     }
 
     // Invariant 1.
@@ -484,7 +540,7 @@ mod tests {
     // Invariant 2.
     #[test]
     fn rejects_bad_magic() {
-        let mut encoded = encode(&sample_bundle());
+        let mut encoded = encode(&sample_bundle()).unwrap();
         encoded[0] = b'X';
         assert!(matches!(
             decode(&encoded),
@@ -495,7 +551,7 @@ mod tests {
     // Invariant 3.
     #[test]
     fn rejects_unsupported_version() {
-        let mut encoded = encode(&sample_bundle());
+        let mut encoded = encode(&sample_bundle()).unwrap();
         encoded[4] = 0xFF;
         assert_eq!(
             decode(&encoded),
@@ -506,7 +562,7 @@ mod tests {
     // Invariant 4.
     #[test]
     fn rejects_unknown_kind() {
-        let mut encoded = encode(&sample_bundle());
+        let mut encoded = encode(&sample_bundle()).unwrap();
         encoded[5] = 9;
         assert_eq!(decode(&encoded), Err(SetupBundleError::UnknownKind(9)));
     }
@@ -514,7 +570,7 @@ mod tests {
     // Invariant 5.
     #[test]
     fn rejects_nonzero_reserved() {
-        let mut encoded = encode(&sample_bundle());
+        let mut encoded = encode(&sample_bundle()).unwrap();
         encoded[6] = 1;
         assert_eq!(decode(&encoded), Err(SetupBundleError::ReservedNotZero(1)));
     }
@@ -522,7 +578,7 @@ mod tests {
     // Invariant 6.
     #[test]
     fn rejects_truncated_table() {
-        let encoded = encode(&sample_bundle());
+        let encoded = encode(&sample_bundle()).unwrap();
         // Keep the header but drop the entry table.
         assert_eq!(
             decode(&encoded[..HEADER_LEN]),
@@ -536,7 +592,7 @@ mod tests {
     // Invariant 7.
     #[test]
     fn rejects_truncated_payload() {
-        let encoded = encode(&sample_bundle());
+        let encoded = encode(&sample_bundle()).unwrap();
         let truncated = &encoded[..encoded.len() - 1];
         assert!(matches!(
             decode(truncated),
@@ -547,7 +603,7 @@ mod tests {
     // Invariant 8.
     #[test]
     fn rejects_offset_inside_the_table() {
-        let mut encoded = encode(&sample_bundle());
+        let mut encoded = encode(&sample_bundle()).unwrap();
         // Entry 0's offset is at bytes 20..24.
         encoded[20..24].copy_from_slice(&0u32.to_le_bytes());
         assert_eq!(
@@ -562,7 +618,7 @@ mod tests {
     // Invariant 9.
     #[test]
     fn rejects_payload_gap() {
-        let mut encoded = encode(&sample_bundle());
+        let mut encoded = encode(&sample_bundle()).unwrap();
         // Append a byte so a shifted payload can stay in-bounds.
         encoded.push(0);
         // Move the zero-length present entry (entry 1, offset at 32..36) one
@@ -577,7 +633,7 @@ mod tests {
 
     #[test]
     fn rejects_trailing_bytes() {
-        let mut encoded = encode(&sample_bundle());
+        let mut encoded = encode(&sample_bundle()).unwrap();
         encoded.push(0);
         assert_eq!(
             decode(&encoded),
@@ -591,7 +647,7 @@ mod tests {
             setup_id: 1,
             entries: vec![present(0x0200_0001, &[1, 2]), present(0x0200_0002, &[3, 4])],
         };
-        let mut encoded = encode(&bundle);
+        let mut encoded = encode(&bundle).unwrap();
         // Entry 1's offset lives at 16 + 12 + 4 = 32..36. Point it one byte back
         // into entry 0's payload so the two ranges overlap (and leave a trailing
         // byte), which must be rejected.
@@ -610,7 +666,7 @@ mod tests {
             setup_id: 1,
             entries: vec![missing(0x0200_0001), missing(0x0200_0002)],
         };
-        let encoded = encode(&bundle);
+        let encoded = encode(&bundle).unwrap();
         assert_eq!(encoded.len(), HEADER_LEN + 2 * ENTRY_LEN);
         assert_eq!(decode(&encoded).unwrap(), bundle);
 
@@ -630,7 +686,7 @@ mod tests {
             entries: vec![present(0x0200_0001, &[]), present(0x0200_0001, &[])],
         };
         assert_eq!(
-            decode(&encode(&bundle)),
+            decode(&encode(&bundle).unwrap()),
             Err(SetupBundleError::DuplicateEntry { id: 0x0200_0001 })
         );
     }

@@ -3,7 +3,7 @@ use acprotocol::dat::reader::{
 };
 use counting_reader::CountingRangeReader;
 use routes::{
-    dats_index, envcells_get, files_get, files_index, icons_get, icons_index, index_get,
+    batch_get, dats_index, envcells_get, files_get, files_index, icons_get, icons_index, index_get,
     landblocks_get, setups_get,
 };
 use std::error::Error;
@@ -104,6 +104,7 @@ async fn fetch(req: Request, env: Env, _ctx: Context) -> Result<Response> {
     let url_string = req.url()?;
     let files_index_url = url_string.clone();
     let files_get_url = url_string.clone();
+    let batch_url = url_string.clone();
     let icons_url = url_string.clone();
     let icons_index_url = icons_url.clone();
     let setups_url = url_string.clone();
@@ -115,6 +116,9 @@ async fn fetch(req: Request, env: Env, _ctx: Context) -> Result<Response> {
         })
         .get_async("/dats/:dat/files/:file_id", move |_, ctx| {
             files_get(files_get_url.clone(), ctx)
+        })
+        .get_async("/dats/:dat/batch", move |_, ctx| {
+            batch_get(batch_url.clone(), ctx)
         })
         .get_async("/dats/:dat/landblocks/:block", |_, ctx| landblocks_get(ctx))
         .get_async("/dats/:dat/envcells/:block", |_, ctx| envcells_get(ctx))

@@ -399,6 +399,38 @@ pub async fn index_get(_ctx: RouteContext<()>) -> Result<Response> {
         },
     );
     paths.insert(
+        "/dats/{dat}/batch".to_string(),
+        PathItem {
+            get: Some(Operation {
+                summary: "Batch-read many files from a DAT".to_string(),
+                description: "Returns a multipart/mixed response with one part per requested file ID that exists in the DAT. IDs are comma-separated decimals or 0x-prefixed hex values; duplicates are removed and order is preserved. Missing IDs are omitted (absence means not found) and never fail the batch. At most 512 ids and 8 MiB of combined payload are accepted, otherwise the request is rejected with 413.".to_string(),
+                operation_id: "batch_get".to_string(),
+                parameters: vec![
+                    string_path_parameter("dat", "DAT name. Use 'portal', 'cell', 'highres', or 'local_english'."),
+                    Parameter {
+                        name: "ids".to_string(),
+                        location: "query".to_string(),
+                        description: "Comma-separated file IDs, each a decimal value or a 0x/0X-prefixed hexadecimal value. Duplicates are removed and first-occurrence order is preserved.".to_string(),
+                        required: true,
+                        schema: Schema::ObjectSchema {
+                            schema_type: "string".to_string(),
+                            default: None,
+                            minimum: None,
+                            maximum: None,
+                            format: None,
+                            min_length: None,
+                            max_length: None,
+                            read_only: None,
+                            description: None,
+                            properties: None,
+                            required: vec![],
+                        },
+                    },
+                ],
+            }),
+        },
+    );
+    paths.insert(
         "/setups/{id}".to_string(),
         PathItem {
             get: Some(Operation {
@@ -1086,6 +1118,151 @@ pub async fn files_get(url: Url, ctx: RouteContext<()>) -> Result<Response> {
     Ok(with_cors_headers(with_dat_asset_cache_headers(response)?))
 }
 
+/// Maximum number of (deduplicated) file IDs accepted by the batch route.
+pub(crate) const MAX_BATCH_IDS: usize = 512;
+/// Maximum combined payload bytes (excluding multipart framing) accepted by the
+/// batch route, matching the `setups_get` bundle budget.
+pub(crate) const MAX_BATCH_PAYLOAD_BYTES: usize = 8 * 1024 * 1024;
+
+/// Parse the comma-separated `ids` query value into file IDs, preserving
+/// first-occurrence order and dropping duplicates. Each token is a decimal
+/// value or a `0x`/`0X`-prefixed hex value, parsed with [`parse_file_id`].
+pub(crate) fn parse_batch_ids(raw: &str) -> std::result::Result<Vec<u32>, String> {
+    let mut ids: Vec<u32> = Vec::new();
+    for token in raw.split(',') {
+        let token = token.trim();
+        if token.is_empty() {
+            return Err(
+                "Invalid ids: the comma-separated list contains an empty file ID.".to_string(),
+            );
+        }
+        let id = parse_file_id(token).map_err(|error| error.to_string())?;
+        if !ids.contains(&id) {
+            ids.push(id);
+        }
+    }
+    Ok(ids)
+}
+
+/// Reject batch requests that ask for more than [`MAX_BATCH_IDS`] distinct IDs.
+pub(crate) fn check_batch_id_count(count: usize) -> std::result::Result<(), (u16, String)> {
+    if count > MAX_BATCH_IDS {
+        Err((
+            413,
+            format!(
+                "Too many ids: {} requested; the maximum is {}.",
+                count, MAX_BATCH_IDS
+            ),
+        ))
+    } else {
+        Ok(())
+    }
+}
+
+/// Assemble a batch `multipart/mixed` response from the requested IDs and the
+/// payloads that were actually found. Missing IDs are omitted; parts follow
+/// the (already deduplicated) requested order. Returns an HTTP `(status, body)`
+/// error tuple of `(413, message)` when the combined payload exceeds
+/// [`MAX_BATCH_PAYLOAD_BYTES`].
+pub(crate) fn build_batch_multipart(
+    dat_name: &str,
+    requested: &[u32],
+    mut available: HashMap<u32, Vec<u8>>,
+) -> std::result::Result<(String, Vec<u8>), (u16, String)> {
+    let mut total_bytes: usize = 0;
+    let mut parts = Vec::new();
+    for id in requested {
+        if let Some(data) = available.remove(id) {
+            total_bytes = total_bytes.saturating_add(data.len());
+            parts.push(MultipartPart {
+                file_id: *id,
+                kind: "file",
+                data,
+            });
+        }
+    }
+
+    if total_bytes > MAX_BATCH_PAYLOAD_BYTES {
+        return Err((
+            413,
+            format!(
+                "Batch payload is {} bytes before multipart framing; the maximum is {} bytes.",
+                total_bytes, MAX_BATCH_PAYLOAD_BYTES
+            ),
+        ));
+    }
+
+    Ok(encode_multipart_mixed_for_dat(&parts, dat_name))
+}
+
+/// `GET /dats/:dat/batch?ids=0x…,0x…`: read many files from one DAT in a single
+/// `multipart/mixed` response. IDs that are absent are omitted (absence means
+/// not found); the batch never 404s because one ID is missing.
+pub async fn batch_get(url: Url, ctx: RouteContext<()>) -> Result<Response> {
+    let query_params: HashMap<_, _> = url.query_pairs().into_owned().collect();
+
+    let param_dat = match ctx.param("dat") {
+        Some(value) => value,
+        None => return Response::error("Must specify DAT name.", 400),
+    };
+    let (database_type, _) = match parse_dat_param(param_dat) {
+        Ok(value) => value,
+        Err(error) => return Response::error(error.to_string(), 400),
+    };
+
+    let raw_ids = match query_params.get("ids") {
+        Some(value) => value,
+        None => return Response::error("Must specify ids.", 400),
+    };
+    let ids = match parse_batch_ids(raw_ids) {
+        Ok(ids) => ids,
+        Err(message) => return Response::error(message, 400),
+    };
+    if ids.is_empty() {
+        return Response::error("Must specify at least one file ID.", 400);
+    }
+    if let Err((status, message)) = check_batch_id_count(ids.len()) {
+        return Response::error(message, status);
+    }
+
+    // Read each requested ID from the same pre-extracted R2 bucket that
+    // `files_get` uses by default. Missing objects are skipped rather than
+    // failing the whole batch.
+    let bucket = ctx.bucket("EXTRACTED_BUCKET")?;
+    let dat_name = database_type.name();
+    let mut available: HashMap<u32, Vec<u8>> = HashMap::new();
+    for &file_id in &ids {
+        let object_key = format!("{}/0x{:08X}.bin", dat_name, file_id);
+        let object = bucket.get(&object_key).execute().await.map_err(|error| {
+            worker::Error::RustError(format!("Failed to read from R2: {}", error))
+        })?;
+        let Some(object) = object else {
+            continue;
+        };
+        let bytes = object
+            .body()
+            .ok_or_else(|| worker::Error::RustError("Empty object body".into()))?
+            .bytes()
+            .await
+            .map_err(|error| {
+                worker::Error::RustError(format!("Failed to read object body: {}", error))
+            })?;
+        available.insert(file_id, bytes);
+    }
+
+    let (boundary, body) = match build_batch_multipart(dat_name, &ids, available) {
+        Ok(value) => value,
+        Err((status, message)) => return Response::error(message, status),
+    };
+
+    let mut response = Response::from_bytes(body)?;
+    response.headers_mut().set(
+        "Content-Type",
+        &format!("multipart/mixed; boundary={boundary}"),
+    )?;
+    Ok(with_cors_headers(with_dat_asset_cache_headers(response)?))
+}
+
 /// `GET /dats/cell/landblocks/{block}`: the ACLB landblock metadata bundle.
 pub async fn landblocks_get(ctx: RouteContext<()>) -> Result<Response> {
     bundle_get(ctx, BundleKind::Landblock).await
@@ -1246,14 +1423,28 @@ fn multipart_boundary(parts: &[MultipartPart]) -> String {
     unreachable!("a multipart boundary suffix is always available")
 }
 
+/// Encode `parts` as a `multipart/mixed` body whose `Content-Location` headers
+/// point at the portal DAT. Convenience wrapper over
+/// [`encode_multipart_mixed_for_dat`] for the portal-only setup route.
 pub(crate) fn encode_multipart_mixed(parts: &[MultipartPart]) -> (String, Vec<u8>) {
+    encode_multipart_mixed_for_dat(parts, "portal")
+}
+
+/// Encode `parts` as a `multipart/mixed` body. Each `Content-Location` header
+/// is parameterized to `/dats/{dat_name}/files/0x{id}` so the framing is
+/// reusable across DATs (the setup route uses `"portal"`; the batch route
+/// passes the requested DAT's canonical name).
+pub(crate) fn encode_multipart_mixed_for_dat(
+    parts: &[MultipartPart],
+    dat_name: &str,
+) -> (String, Vec<u8>) {
     let boundary = multipart_boundary(parts);
     let mut body = Vec::new();
 
     for part in parts {
         body.extend_from_slice(
             format!(
-                "--{boundary}\r\nContent-Type: application/octet-stream\r\nContent-ID: <0x{:08X}>\r\nContent-Disposition: attachment; filename=\"0x{:08X}.{}.bin\"\r\nContent-Location: /dats/portal/files/0x{:08X}\r\n\r\n",
+                "--{boundary}\r\nContent-Type: application/octet-stream\r\nContent-ID: <0x{:08X}>\r\nContent-Disposition: attachment; filename=\"0x{:08X}.{}.bin\"\r\nContent-Location: /dats/{dat_name}/files/0x{:08X}\r\n\r\n",
                 part.file_id, part.file_id, part.kind, part.file_id
             )
             .as_bytes(),

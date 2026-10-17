@@ -13,6 +13,7 @@ Built with Cloudflare Workers, R2, and D1.
 | [`/dats/:dat/files/:file_id`](https://dats.treestats.net/dats/portal/files/16777217) | Get a file by ID from a DAT. By default the file is served as a single static pre-extracted R2 object (no block-chain traversal, no D1). Add `?source=dat` to read the original DAT via D1 metadata and block-chain traversal instead, or `?format=json` for a JSON representation of CharGen or SpellTable entries. | [`https://dats.treestats.net/dats/portal/files/16777217`](https://dats.treestats.net/dats/portal/files/16777217) |
 | [`/dats/cell/landblocks/:block`](https://dats.treestats.net/dats/cell/landblocks/0xB34A) | Get the ACLB landblock bundle (terrain `…FFFF` + LandblockInfo `…FFFE`) for one landblock, served from the pre-extracted R2 bucket as `cell/landblocks/0x{block:04X}.bin`. `:block` accepts a 16-bit landblock id (`0xB34A`) or any full file id in the block (`0xB34AFFFF`). Only the cell DAT has bundles. | [`https://dats.treestats.net/dats/cell/landblocks/0xB34A`](https://dats.treestats.net/dats/cell/landblocks/0xB34A) |
 | [`/dats/cell/envcells/:block`](https://dats.treestats.net/dats/cell/envcells/0xB34A) | Get the ACLB EnvCell bundle for one landblock, served as `cell/envcells/0x{block:04X}.bin`. `:block` accepts a landblock id (`0xB34A`) or any full cell id in it (`0x1E3033D`). Only the cell DAT has bundles. | [`https://dats.treestats.net/dats/cell/envcells/0xB34A`](https://dats.treestats.net/dats/cell/envcells/0xB34A) |
+| [`/dats/:dat/setups/:id`](https://dats.treestats.net/dats/portal/setups/0x02001B7F) | Get a precomputed **ACSP** setup pack: a Setup's entire render closure (Setup + GfxObjs + Surfaces + SurfaceTextures + Textures + Palettes) in one object, served from the pre-extracted R2 bucket as `portal/setups/0x{id:08X}.bin`. Only the portal DAT has setup packs. Generate with the ac-noclip `scripts/gen-setup-packs.ts`. | [`https://dats.treestats.net/dats/portal/setups/0x02001B7F`](https://dats.treestats.net/dats/portal/setups/0x02001B7F) |
 | [`/icons`](https://dats.treestats.net/icons) | List icon metadata as paginated JSON Lines (default and maximum limit 1000) | [`https://dats.treestats.net/icons?limit=100&after=0`](https://dats.treestats.net/icons?limit=100&after=0) |
 | [`/icons/:id`](https://dats.treestats.net/icons/26967) | Get icon as PNG | [`https://dats.treestats.net/icons/26967?scale=2`](https://dats.treestats.net/icons/26967?scale=2) |
 | [`/setups/:id`](https://dats.treestats.net/setups/0x02000108) | Get a portal DAT Setup (0x02) by ID as raw binary, or a multipart/mixed bundle of the Setup and its GraphicsObject (0x01) dependencies via `?include=gfxobjs`. IDs accept decimal or hex (0x/0X) forms. Note: `fetch()` does not parse multipart/mixed responses automatically; consumers must parse the MIME boundary or use a MIME parser. | [`https://dats.treestats.net/setups/0x02000108`](https://dats.treestats.net/setups/0x02000108) |
@@ -62,6 +63,29 @@ hex landblock id. The subdirectory mirrors the R2 prefix used by the
 `generate … -o export/cell` followed by syncing `export/cell/` publishes the
 bundles beside the per-id files in the extracted bucket. Pass `--block 0xB34A`
 to generate a single block.
+
+## Generating setup packs
+
+A standalone Setup's render closure is 15–167 portal files (Setup, GfxObjs,
+Surfaces, SurfaceTextures, Textures, Palettes). The **ACSP** setup pack collapses
+that into one object per Setup, served by
+`/dats/:dat/setups/:id` from `portal/setups/0x{id:08X}.bin`. The byte-level
+format is documented in [`docs/setup-bundle-format.md`](./docs/setup-bundle-format.md).
+
+The closure walk lives in ac-noclip (it needs the Setup/GfxObj/Surface parsers),
+so generation is a TypeScript tool in that repo:
+
+```sh
+# In ac-noclip. Writes <out>/portal/setups/0x{id:08X}.bin for every renderable Setup.
+DATS_DIR="$HOME/Dats" npx tsx scripts/gen-setup-packs.ts --out=export
+# One Setup, or the first N of the catalog.
+DATS_DIR="$HOME/Dats" npx tsx scripts/gen-setup-packs.ts --id=0x02001B7F --out=export
+DATS_DIR="$HOME/Dats" npx tsx scripts/gen-setup-packs.ts --limit=100 --out=export
+```
+
+The output subdirectory mirrors the R2 prefix, so syncing `export/portal/setups/`
+publishes the packs beside the per-id files in the extracted bucket (see
+[Pre-extracting Files to R2](#pre-extracting-files-to-r2)).
 
 ## Development
 

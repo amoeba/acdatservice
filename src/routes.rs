@@ -160,6 +160,11 @@ pub(crate) fn bundle_object_key(kind: BundleKind, block: u16) -> String {
     format!("cell/{collection}/0x{block:04X}.bin")
 }
 
+/// R2 object key for a setup pack: `portal/setups/0x{setup_id:08X}.bin` (uppercase 8-hex mirrors the other extracted keys).
+pub(crate) fn setup_bundle_object_key(setup_id: u32) -> String {
+    format!("portal/setups/0x{setup_id:08X}.bin")
+}
+
 #[derive(serde::Deserialize)]
 struct DatMetadataRow {
     database_type: i64,
@@ -510,6 +515,20 @@ pub async fn index_get(_ctx: RouteContext<()>) -> Result<Response> {
                         "block",
                         "Landblock id (0xB34A) or any full file id in the block (0x1E3033D).",
                     ),
+                ],
+            }),
+        },
+    );
+    paths.insert(
+        "/dats/{dat}/setups/{id}".to_string(),
+        PathItem {
+            get: Some(Operation {
+                summary: "Get a precomputed setup pack".to_string(),
+                description: "Returns the ACSP bundle of a Setup's full render closure, served from the extracted R2 bucket as portal/setups/0x{id:08X}.bin. Only the portal DAT has setup packs.".to_string(),
+                operation_id: "setups_bundle_get".to_string(),
+                parameters: vec![
+                    string_path_parameter("dat", "DAT name. Only 'portal' has setup packs."),
+                    string_path_parameter("id", "Setup file id (0x02001B7F or decimal)."),
                 ],
             }),
         },
@@ -1308,6 +1327,59 @@ async fn bundle_get(ctx: RouteContext<()>, kind: BundleKind) -> Result<Response>
         return Response::error(
             format!(
                 "No bundle at {object_key}. Generate it with `acdatservice generate` and upload it."
+            ),
+            404,
+        );
+    };
+    let bytes = object
+        .body()
+        .ok_or_else(|| worker::Error::RustError("Empty object body".into()))?
+        .bytes()
+        .await
+        .map_err(|error| {
+            worker::Error::RustError(format!("Failed to read object body: {error}"))
+        })?;
+
+    let mut response = Response::from_bytes(bytes)?;
+    response
+        .headers_mut()
+        .set("Content-Type", "application/octet-stream")?;
+    Ok(with_cors_headers(with_dat_asset_cache_headers(response)?))
+}
+
+/// `GET /dats/portal/setups/{id}`: a precomputed ACSP setup pack.
+pub async fn setups_bundle_get(ctx: RouteContext<()>) -> Result<Response> {
+    let param_dat = match ctx.param("dat") {
+        Some(value) => value,
+        None => return Response::error("Must specify DAT name.", 400),
+    };
+    let (database_type, _) = match parse_dat_param(param_dat) {
+        Ok(value) => value,
+        Err(err) => return Response::error(err.to_string(), 400),
+    };
+    if database_type != DatDatabaseType::Portal {
+        return Response::error("Setup packs are only available for the portal DAT.", 400);
+    }
+
+    let param_id = match ctx.param("id") {
+        Some(value) => value,
+        None => return Response::error("Must specify a setup id.", 400),
+    };
+    let id = match parse_file_id(param_id) {
+        Ok(value) => value,
+        Err(error) => return Response::error(error.to_string(), 400),
+    };
+
+    let key = setup_bundle_object_key(id);
+    let bucket = ctx.bucket("EXTRACTED_BUCKET")?;
+    let object =
+        bucket.get(&key).execute().await.map_err(|error| {
+            worker::Error::RustError(format!("Failed to read from R2: {error}"))
+        })?;
+    let Some(object) = object else {
+        return Response::error(
+            format!(
+                "No setup pack at {key}. Generate it with the ac-noclip scripts/gen-setup-packs.ts tool and upload it to the extracted bucket."
             ),
             404,
         );

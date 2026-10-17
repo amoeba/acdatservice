@@ -4,7 +4,7 @@ use acprotocol::dat::reader::{
 use counting_reader::CountingRangeReader;
 use routes::{
     batch_get, dats_index, envcells_get, files_get, files_index, icons_get, icons_index, index_get,
-    landblocks_get, setups_get,
+    landblocks_get, setups_bundle_get, setups_get,
 };
 use std::error::Error;
 use worker::*;
@@ -16,6 +16,7 @@ mod generators;
 mod lib_test;
 mod openapi;
 mod routes;
+pub mod setup_bundle;
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 #[repr(u32)]
@@ -122,6 +123,7 @@ async fn fetch(req: Request, env: Env, _ctx: Context) -> Result<Response> {
         })
         .get_async("/dats/:dat/landblocks/:block", |_, ctx| landblocks_get(ctx))
         .get_async("/dats/:dat/envcells/:block", |_, ctx| envcells_get(ctx))
+        .get_async("/dats/:dat/setups/:id", |_, ctx| setups_bundle_get(ctx))
         .get_async("/icons", move |_, ctx| {
             icons_index(icons_index_url.clone(), ctx)
         })

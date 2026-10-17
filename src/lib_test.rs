@@ -9,8 +9,9 @@ mod tests {
             build_batch_multipart, bundle_object_key, check_batch_id_count, encode_multipart_mixed,
             encode_multipart_mixed_for_dat, parse_batch_ids, parse_bundle_block,
             parse_file_response_format, parse_file_source, parse_setup_include,
-            parse_setup_part_ids, resolve_extracted_file, FileResponseFormat, FileSource,
-            MultipartPart, SetupInclude, MAX_BATCH_IDS, MAX_BATCH_PAYLOAD_BYTES,
+            parse_setup_part_ids, resolve_extracted_file, setup_bundle_object_key,
+            FileResponseFormat, FileSource, MultipartPart, SetupInclude, MAX_BATCH_IDS,
+            MAX_BATCH_PAYLOAD_BYTES,
         },
         DatDatabaseType,
     };
@@ -144,6 +145,18 @@ mod tests {
         assert_eq!(
             bundle_object_key(BundleKind::Envcell, 0x00AE),
             "cell/envcells/0x00AE.bin"
+        );
+    }
+
+    #[test]
+    fn test_setup_bundle_object_key_layout() {
+        assert_eq!(
+            setup_bundle_object_key(0x02001B7F),
+            "portal/setups/0x02001B7F.bin"
+        );
+        assert_eq!(
+            setup_bundle_object_key(0x2000001),
+            "portal/setups/0x02000001.bin"
         );
     }
 

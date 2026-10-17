@@ -8,10 +8,10 @@ mod tests {
         routes::{
             build_batch_multipart, bundle_object_key, check_batch_id_count, encode_multipart_mixed,
             encode_multipart_mixed_for_dat, parse_batch_ids, parse_bundle_block,
-            parse_file_response_format, parse_file_source, parse_setup_include,
-            parse_setup_part_ids, resolve_extracted_file, setup_bundle_object_key,
-            FileResponseFormat, FileSource, MultipartPart, SetupInclude, MAX_BATCH_IDS,
-            MAX_BATCH_PAYLOAD_BYTES,
+            parse_file_response_format, parse_file_source, parse_setup_bundle_request,
+            parse_setup_include, parse_setup_part_ids, resolve_extracted_file,
+            setup_bundle_object_key, FileResponseFormat, FileSource, MultipartPart, SetupInclude,
+            MAX_BATCH_IDS, MAX_BATCH_PAYLOAD_BYTES,
         },
         DatDatabaseType,
     };
@@ -158,6 +158,69 @@ mod tests {
             setup_bundle_object_key(0x2000001),
             "portal/setups/0x02000001.bin"
         );
+    }
+
+    #[test]
+    fn test_parse_setup_bundle_request_portal_ids() {
+        let expected = (0x02001B7F, "portal/setups/0x02001B7F.bin".to_string());
+
+        // Explicit 8-digit hex.
+        assert_eq!(
+            parse_setup_bundle_request(Some("portal"), Some("0x02001B7F")).unwrap(),
+            expected
+        );
+        // Decimal form of the same id resolves to the same object key.
+        assert_eq!(
+            parse_setup_bundle_request(Some("portal"), Some("33561471")).unwrap(),
+            expected
+        );
+        // Unpadded/minimal hex is normalized to the 8-digit uppercase key.
+        assert_eq!(
+            parse_setup_bundle_request(Some("portal"), Some("0x2001B7F")).unwrap(),
+            expected
+        );
+    }
+
+    #[test]
+    fn test_parse_setup_bundle_request_rejects_non_portal_dat() {
+        assert_eq!(
+            parse_setup_bundle_request(Some("cell"), Some("0x02001B7F")).unwrap_err(),
+            (
+                400,
+                "Setup packs are only available for the portal DAT.".to_string()
+            )
+        );
+    }
+
+    #[test]
+    fn test_parse_setup_bundle_request_rejects_unknown_dat_name() {
+        let (status, message) =
+            parse_setup_bundle_request(Some("bogus"), Some("0x02001B7F")).unwrap_err();
+        assert_eq!(status, 400);
+        assert!(
+            message.contains("portal, cell, highres, or local_english"),
+            "{message}"
+        );
+    }
+
+    #[test]
+    fn test_parse_setup_bundle_request_requires_dat_and_id() {
+        assert_eq!(
+            parse_setup_bundle_request(None, Some("0x02001B7F")).unwrap_err(),
+            (400, "Must specify DAT name.".to_string())
+        );
+        assert_eq!(
+            parse_setup_bundle_request(Some("portal"), None).unwrap_err(),
+            (400, "Must specify a setup id.".to_string())
+        );
+    }
+
+    #[test]
+    fn test_parse_setup_bundle_request_rejects_invalid_id() {
+        let (status, message) =
+            parse_setup_bundle_request(Some("portal"), Some("not-an-id")).unwrap_err();
+        assert_eq!(status, 400);
+        assert!(message.contains("Invalid file ID"), "{message}");
     }
 
     #[test]

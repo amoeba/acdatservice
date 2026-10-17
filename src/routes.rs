@@ -165,6 +165,39 @@ pub(crate) fn setup_bundle_object_key(setup_id: u32) -> String {
     format!("portal/setups/0x{setup_id:08X}.bin")
 }
 
+/// Validate a `/dats/:dat/setups/:id` request and return `(setup_id, object_key)`.
+/// Errors are `(http_status, message)`.
+pub(crate) fn parse_setup_bundle_request(
+    dat: Option<&str>,
+    id: Option<&str>,
+) -> std::result::Result<(u32, String), (u16, String)> {
+    let param_dat = match dat {
+        Some(value) => value,
+        None => return Err((400, "Must specify DAT name.".to_string())),
+    };
+    let (database_type, _) = match parse_dat_param(param_dat) {
+        Ok(value) => value,
+        Err(err) => return Err((400, err.to_string())),
+    };
+    if database_type != DatDatabaseType::Portal {
+        return Err((
+            400,
+            "Setup packs are only available for the portal DAT.".to_string(),
+        ));
+    }
+
+    let param_id = match id {
+        Some(value) => value,
+        None => return Err((400, "Must specify a setup id.".to_string())),
+    };
+    let setup_id = match parse_file_id(param_id) {
+        Ok(value) => value,
+        Err(error) => return Err((400, error.to_string())),
+    };
+
+    Ok((setup_id, setup_bundle_object_key(setup_id)))
+}
+
 #[derive(serde::Deserialize)]
 struct DatMetadataRow {
     database_type: i64,
@@ -1349,28 +1382,14 @@ async fn bundle_get(ctx: RouteContext<()>, kind: BundleKind) -> Result<Response>
 
 /// `GET /dats/portal/setups/{id}`: a precomputed ACSP setup pack.
 pub async fn setups_bundle_get(ctx: RouteContext<()>) -> Result<Response> {
-    let param_dat = match ctx.param("dat") {
-        Some(value) => value,
-        None => return Response::error("Must specify DAT name.", 400),
-    };
-    let (database_type, _) = match parse_dat_param(param_dat) {
+    let (_setup_id, key) = match parse_setup_bundle_request(
+        ctx.param("dat").map(|value| value.as_str()),
+        ctx.param("id").map(|value| value.as_str()),
+    ) {
         Ok(value) => value,
-        Err(err) => return Response::error(err.to_string(), 400),
-    };
-    if database_type != DatDatabaseType::Portal {
-        return Response::error("Setup packs are only available for the portal DAT.", 400);
-    }
-
-    let param_id = match ctx.param("id") {
-        Some(value) => value,
-        None => return Response::error("Must specify a setup id.", 400),
-    };
-    let id = match parse_file_id(param_id) {
-        Ok(value) => value,
-        Err(error) => return Response::error(error.to_string(), 400),
+        Err((status, message)) => return Response::error(message, status),
     };
 
-    let key = setup_bundle_object_key(id);
     let bucket = ctx.bucket("EXTRACTED_BUCKET")?;
     let object =
         bucket.get(&key).execute().await.map_err(|error| {

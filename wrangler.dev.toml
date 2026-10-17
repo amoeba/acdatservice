@@ -1,0 +1,27 @@
+name = "acdatservice"
+main = "build/worker/shim.mjs"
+compatibility_date = "2025-03-09"
+
+# Dev-only config for `wrangler dev --remote`. Same bindings as wrangler.toml
+# (real R2 + D1) but with no custom-domain route and a build command that uses
+# the already-installed worker-build instead of `cargo install worker-build`
+# (whose transitive `zip` dep is currently yanked).
+
+[build]
+command = "worker-build --release"
+
+[[r2_buckets]]
+binding = 'DATS_BUCKET'
+bucket_name = 'treestats-acdats'
+
+[[r2_buckets]]
+binding = 'EXTRACTED_BUCKET'
+bucket_name = 'treestats-acdats-extracted'
+
+[[d1_databases]]
+binding = "DATS_DB"
+database_name = "dats"
+database_id = "21ee3b5f-a28f-43e3-9def-b29f74c6c7ac"
+
+[observability]
+enabled = true

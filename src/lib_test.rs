@@ -6,14 +6,16 @@ mod tests {
         db::File,
         parse_dat_param, parse_decimal_or_hex_string, parse_file_id,
         routes::{
-            bundle_object_key, encode_multipart_mixed, parse_bundle_block,
+            build_batch_multipart, bundle_object_key, check_batch_id_count, encode_multipart_mixed,
+            encode_multipart_mixed_for_dat, parse_batch_ids, parse_bundle_block,
             parse_file_response_format, parse_file_source, parse_setup_include,
             parse_setup_part_ids, resolve_extracted_file, FileResponseFormat, FileSource,
-            MultipartPart, SetupInclude,
+            MultipartPart, SetupInclude, MAX_BATCH_IDS, MAX_BATCH_PAYLOAD_BYTES,
         },
         DatDatabaseType,
     };
     use acprotocol::dat::DatFileType;
+    use std::collections::HashMap;
 
     #[test]
     fn test_dat_block_size_matches_database_type() {
@@ -529,5 +531,203 @@ mod tests {
         // With no parts, root_id is 0 and the body is only the closing delimiter.
         assert_eq!(boundary, "acdatservice-00000000-0");
         assert_eq!(body, format!("--{boundary}--\r\n").as_bytes());
+    }
+
+    // ── batch_get helpers ──────────────────────────────────────────────
+
+    fn find_bytes(haystack: &[u8], needle: &[u8]) -> Option<usize> {
+        haystack
+            .windows(needle.len())
+            .position(|window| window == needle)
+    }
+
+    /// Minimal `multipart/mixed` parser mirroring what the client does: it
+    /// recovers `(Content-ID, payload)` pairs from an encoded body.
+    fn parse_multipart(body: &[u8], boundary: &str) -> Vec<(u32, Vec<u8>)> {
+        let delimiter = format!("--{boundary}\r\n").into_bytes();
+        let closing = format!("--{boundary}--").into_bytes();
+        let separator = format!("\r\n--{boundary}").into_bytes();
+
+        assert!(
+            body.starts_with(&delimiter),
+            "body must start with the boundary delimiter"
+        );
+        let mut cursor = delimiter.len();
+        let mut parts = Vec::new();
+
+        loop {
+            let header_end =
+                find_bytes(&body[cursor..], b"\r\n\r\n").expect("header terminator") + cursor;
+            let headers = std::str::from_utf8(&body[cursor..header_end]).unwrap();
+            let content_id = headers
+                .lines()
+                .find(|line| line.starts_with("Content-ID:"))
+                .expect("Content-ID header");
+            let id_hex = content_id
+                .trim_start_matches("Content-ID: <0x")
+                .trim_end_matches('>');
+            let id = u32::from_str_radix(id_hex, 16).unwrap();
+
+            let payload_start = header_end + 4;
+            let separator_start = find_bytes(&body[payload_start..], &separator)
+                .expect("part separator")
+                + payload_start;
+            parts.push((id, body[payload_start..separator_start].to_vec()));
+
+            cursor = separator_start + 2;
+            if body[cursor..].starts_with(&closing) {
+                break;
+            }
+            assert!(
+                body[cursor..].starts_with(&delimiter),
+                "expected the next boundary delimiter"
+            );
+            cursor += delimiter.len();
+        }
+
+        parts
+    }
+
+    #[test]
+    fn test_parse_batch_ids_dedupes_and_preserves_order() {
+        assert_eq!(
+            parse_batch_ids("0x02000108,0x010008AB,0x02000108").unwrap(),
+            vec![0x02000108, 0x010008AB]
+        );
+        // Decimal and hex forms of the same id dedupe together.
+        assert_eq!(
+            parse_batch_ids("16777224,0x01000008,0x01000008").unwrap(),
+            vec![0x01000008]
+        );
+        // Surrounding whitespace is tolerated.
+        assert_eq!(
+            parse_batch_ids(" 0x02000108 , 0x010008AB ").unwrap(),
+            vec![0x02000108, 0x010008AB]
+        );
+    }
+
+    #[test]
+    fn test_parse_batch_ids_rejects_invalid_input() {
+        for raw in [
+            "",
+            "0xZZ",
+            "0x02000108,,0x010008AB",
+            "0x02000108,",
+            "not-a-number",
+        ] {
+            assert!(
+                parse_batch_ids(raw).is_err(),
+                "expected {:?} to be rejected",
+                raw
+            );
+        }
+    }
+
+    #[test]
+    fn test_build_batch_multipart_found_and_missing_in_order() {
+        let requested = vec![0x02000108, 0x02000109, 0x0200010A];
+        let mut available = HashMap::new();
+        available.insert(0x02000108, vec![1, 2, 3, 4]);
+        // 0x02000109 is missing.
+        available.insert(0x0200010A, vec![0xFF, 0xFE]);
+
+        let (boundary, body) = build_batch_multipart("portal", &requested, available).unwrap();
+
+        // Missing ids are omitted; present ids keep the requested order.
+        let parsed = parse_multipart(&body, &boundary);
+        assert_eq!(
+            parsed,
+            vec![
+                (0x02000108, vec![1, 2, 3, 4]),
+                (0x0200010A, vec![0xFF, 0xFE]),
+            ]
+        );
+    }
+
+    #[test]
+    fn test_build_batch_multipart_dedupes_repeated_ids() {
+        // Dedupe happens at parse time; the assembly must only emit one part.
+        let ids = parse_batch_ids("0x02000108,0x02000109,0x02000108").unwrap();
+        assert_eq!(ids, vec![0x02000108, 0x02000109]);
+
+        let mut available = HashMap::new();
+        available.insert(0x02000108, b"first".to_vec());
+        available.insert(0x02000109, b"second".to_vec());
+
+        let (boundary, body) = build_batch_multipart("portal", &ids, available).unwrap();
+        let parsed = parse_multipart(&body, &boundary);
+        assert_eq!(parsed.len(), 2);
+        assert_eq!(parsed[0], (0x02000108, b"first".to_vec()));
+        assert_eq!(parsed[1], (0x02000109, b"second".to_vec()));
+    }
+
+    #[test]
+    fn test_build_batch_multipart_framing_round_trips() {
+        // Payload bytes deliberately include \r, \n, and \0.
+        let requested = vec![0x00000001, 0x00000002];
+        let mut available = HashMap::new();
+        available.insert(0x00000001, vec![0x00, 0x0D, 0x0A, 0x0D, 0x0A]);
+        available.insert(0x00000002, (0u8..=255).collect());
+
+        let (boundary, body) = build_batch_multipart("portal", &requested, available).unwrap();
+
+        assert!(body.ends_with(format!("--{boundary}--\r\n").as_bytes()));
+
+        let parsed = parse_multipart(&body, &boundary);
+        let recovered: HashMap<u32, Vec<u8>> = parsed.into_iter().collect();
+        assert_eq!(recovered[&0x00000001], vec![0x00, 0x0D, 0x0A, 0x0D, 0x0A]);
+        assert_eq!(recovered[&0x00000002], (0u8..=255).collect::<Vec<u8>>());
+    }
+
+    #[test]
+    fn test_build_batch_multipart_parameterizes_content_location() {
+        let mut available = HashMap::new();
+        available.insert(0x010008AB, vec![9]);
+
+        let (boundary, body) = build_batch_multipart("cell", &[0x010008AB], available).unwrap();
+        assert_eq!(boundary, "acdatservice-010008AB-0");
+        let text = String::from_utf8(body).unwrap();
+        assert!(
+            text.contains("Content-Location: /dats/cell/files/0x010008AB\r\n"),
+            "Content-Location must name the requested DAT, got:\n{text}"
+        );
+
+        // The portal-only wrapper still points at portal.
+        let (_, portal_body) = encode_multipart_mixed_for_dat(
+            &[MultipartPart {
+                file_id: 0x010008AB,
+                kind: "gfxobj",
+                data: vec![9],
+            }],
+            "portal",
+        );
+        assert!(String::from_utf8(portal_body)
+            .unwrap()
+            .contains("Content-Location: /dats/portal/files/0x010008AB\r\n"));
+    }
+
+    #[test]
+    fn test_build_batch_multipart_rejects_oversized_payload() {
+        let requested = vec![0x01000001];
+        let mut available = HashMap::new();
+        available.insert(0x01000001, vec![0u8; MAX_BATCH_PAYLOAD_BYTES + 1]);
+
+        let (status, message) = build_batch_multipart("portal", &requested, available).unwrap_err();
+        assert_eq!(status, 413);
+        assert!(message.contains("maximum"), "got: {message}");
+
+        // Exactly at the limit is accepted.
+        let mut ok_available = HashMap::new();
+        ok_available.insert(0x01000001, vec![0u8; MAX_BATCH_PAYLOAD_BYTES]);
+        assert!(build_batch_multipart("portal", &requested, ok_available).is_ok());
+    }
+
+    #[test]
+    fn test_check_batch_id_count_caps_at_512() {
+        assert!(check_batch_id_count(0).is_ok());
+        assert!(check_batch_id_count(MAX_BATCH_IDS).is_ok());
+        let (status, message) = check_batch_id_count(MAX_BATCH_IDS + 1).unwrap_err();
+        assert_eq!(status, 413);
+        assert!(message.contains("Too many ids"), "got: {message}");
     }
 }

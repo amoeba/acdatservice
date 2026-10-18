@@ -13,6 +13,7 @@ Built with Cloudflare Workers, R2, and D1.
 | [`/dats/:dat/files/:file_id`](https://dats.treestats.net/dats/portal/files/16777217) | Get a file by ID from a DAT. By default the file is served as a single static pre-extracted R2 object (no block-chain traversal, no D1). Add `?source=dat` to read the original DAT via D1 metadata and block-chain traversal instead, or `?format=json` for a JSON representation of CharGen or SpellTable entries. | [`https://dats.treestats.net/dats/portal/files/16777217`](https://dats.treestats.net/dats/portal/files/16777217) |
 | [`/dats/cell/landblocks/:block`](https://dats.treestats.net/dats/cell/landblocks/0xB34A) | Get the ACLB landblock bundle (terrain `…FFFF` + LandblockInfo `…FFFE`) for one landblock, served from the pre-extracted R2 bucket as `cell/landblocks/0x{block:04X}.bin`. `:block` accepts a 16-bit landblock id (`0xB34A`) or any full file id in the block (`0xB34AFFFF`). Only the cell DAT has bundles. | [`https://dats.treestats.net/dats/cell/landblocks/0xB34A`](https://dats.treestats.net/dats/cell/landblocks/0xB34A) |
 | [`/dats/cell/envcells/:block`](https://dats.treestats.net/dats/cell/envcells/0xB34A) | Get the ACLB EnvCell bundle for one landblock, served as `cell/envcells/0x{block:04X}.bin`. `:block` accepts a landblock id (`0xB34A`) or any full cell id in it (`0x1E3033D`). Only the cell DAT has bundles. | [`https://dats.treestats.net/dats/cell/envcells/0xB34A`](https://dats.treestats.net/dats/cell/envcells/0xB34A) |
+| [`/dats/world/landblock-instances/:block`](https://dats.treestats.net/dats/world/landblock-instances/0xB34A) | Get the **ACLI** landblock-instances file: the ACE world database's static props (fountains, doors, chests, lifestones, and similar) pre-resolved into one self-describing blob, served from the pre-extracted R2 bucket as `world/landblock-instances/0x{block:04X}.bin`. `:block` accepts a 16-bit landblock id (`0xB34A`) or any full file id in the block (`0xB34AFFFF`). | [`https://dats.treestats.net/dats/world/landblock-instances/0xB34A`](https://dats.treestats.net/dats/world/landblock-instances/0xB34A) |
 | [`/dats/:dat/setups/:id`](https://dats.treestats.net/dats/portal/setups/0x02001B7F) | Get a precomputed **ACSP** setup pack: a Setup's entire render closure (Setup + GfxObjs + Surfaces + SurfaceTextures + Textures + Palettes) in one object, served from the pre-extracted R2 bucket as `portal/setups/0x{id:08X}.bin`. Only the portal DAT has setup packs. Generate with the ac-noclip `scripts/gen-setup-packs.ts`. | [`https://dats.treestats.net/dats/portal/setups/0x02001B7F`](https://dats.treestats.net/dats/portal/setups/0x02001B7F) |
 | [`/icons`](https://dats.treestats.net/icons) | List icon metadata as paginated JSON Lines (default and maximum limit 1000) | [`https://dats.treestats.net/icons?limit=100&after=0`](https://dats.treestats.net/icons?limit=100&after=0) |
 | [`/icons/:id`](https://dats.treestats.net/icons/26967) | Get icon as PNG | [`https://dats.treestats.net/icons/26967?scale=2`](https://dats.treestats.net/icons/26967?scale=2) |
@@ -86,6 +87,43 @@ DATS_DIR="$HOME/Dats" npx tsx scripts/gen-setup-packs.ts --limit=100 --out=expor
 The output subdirectory mirrors the R2 prefix, so syncing `export/portal/setups/`
 publishes the packs beside the per-id files in the extracted bucket (see
 [Pre-extracting Files to R2](#pre-extracting-files-to-r2)).
+
+## Generating and publishing landblock instances
+
+The ACE world database places server-side objects — fountains, doors, chests,
+lifestones, and similar static props — that are not in the client DATs. The
+**ACLI** landblock-instances format pre-resolves each instance's model,
+placement, and appearance offline into one small file per landblock, served by
+`/dats/world/landblock-instances/:block` from the R2 key
+`world/landblock-instances/0x{block:04X}.bin`. The byte-level format is
+documented in [`docs/landblock-instances-format.md`](./docs/landblock-instances-format.md).
+
+Like ACSP setup packs, generation needs the ACE world database joins, so it is a
+TypeScript tool in ac-noclip:
+
+```sh
+# In ac-noclip. Writes <out>/world/landblock-instances/0x{block:04X}.bin.
+npx tsx scripts/gen-landblock-instances.ts --out=export
+```
+
+The output subdirectory mirrors the R2 prefix. Publish it with
+`scripts/upload_landblock_instances.sh`, which mirrors
+`export/world/landblock-instances/` (override with `SRC_DIR`) to
+`s3://$BUCKET/world/landblock-instances/` using `aws s3 sync --delete`
+(`BUCKET` is required; preview with `DRYRUN=1`):
+
+```sh
+export AWS_ACCESS_KEY_ID=<token-id>
+export AWS_SECRET_ACCESS_KEY=<token-secret>
+export AWS_ENDPOINT_URL=https://<account-id>.r2.cloudflarestorage.com
+
+BUCKET=treestats-acdats-extracted ./scripts/upload_landblock_instances.sh
+DRYRUN=1 ./scripts/upload_landblock_instances.sh   # preview without changes
+```
+
+A run with no generated files refuses to sync rather than deleting the prefix
+(see [Pre-extracting Files to R2](#pre-extracting-files-to-r2) for the shared R2
+setup).
 
 ## Development
 
@@ -170,7 +208,9 @@ done
 Or run `scripts/upload_exported_dats.sh`, a thin wrapper that checks the R2
 environment and mirrors each non-empty `export/<dat>/` (`BUCKET` is required;
 preview with `DRYRUN=1`). `--delete` requires an R2 token with Object Read &
-Write (ListBucket + DeleteObject).
+Write (ListBucket + DeleteObject). The generated `export/world/landblock-instances/`
+tree is published the same way with `scripts/upload_landblock_instances.sh` (see
+[Generating and publishing landblock instances](#generating-and-publishing-landblock-instances)).
 
 After upload, files are addressable at keys like `portal/0x06006957.bin`,
 `cell/0x01000001.bin`, etc. The Worker reads these directly with a single

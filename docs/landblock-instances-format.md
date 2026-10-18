@@ -1,6 +1,6 @@
 # ACLI landblock-instances format
 
-Version 1. Status: **draft** — implemented and unit-tested in
+Version 2. Status: **draft** — implemented and unit-tested in
 [`src/landblock_instances.rs`](../src/landblock_instances.rs); written by the
 ac-noclip `scripts/gen-landblock-instances.ts` tool and served by
 `/dats/world/landblock-instances/:block`.
@@ -31,7 +31,7 @@ file per landblock, so the client can draw them without any database access.
 | Offset | Size | Type  | Field           | Notes                                      |
 | -----: | ---: | :---- | :-------------- | :----------------------------------------- |
 | `0x00` |    4 | bytes | `magic`         | `41 43 4C 49` = ASCII `ACLI`               |
-| `0x04` |    1 | `u8`  | `version`       | `1`                                        |
+| `0x04` |    1 | `u8`  | `version`       | `2`                                        |
 | `0x05` |    1 | `u8`  | `kind`          | `1` = landblock instances                  |
 | `0x06` |    2 | `u16` | `reserved`      | must be `0`                                |
 | `0x08` |    4 | `u32` | `landblock`     | 16-bit block id (`0..=0xFFFF`)             |
@@ -39,7 +39,9 @@ file per landblock, so the client can draw them without any database access.
 
 ### Records — `instanceCount` records, back to back
 
-Each record is **48 bytes** plus `6 × textureCount` override bytes.
+Each version-2 record is **52 bytes** plus `6 × textureCount` override bytes.
+Version-1 records are **48 bytes** plus the same override bytes (they have no
+`motionTableId`).
 
 | Offset | Size      | Type  | Field                              | Notes |
 | -----: | --------: | :---- | :--------------------------------- | :---- |
@@ -53,13 +55,16 @@ Each record is **48 bytes** plus `6 × textureCount` override bytes.
 | `0x2C` |         1 | `u8`  | `weenieType`                       | ACE WeenieType, for client filtering |
 | `0x2D` |         1 | `u8`  | `flags`                            | bit0 = `is_Link_Child`; rest reserved |
 | `0x2E` |         2 | `u16` | `textureCount` (`T`)               | number of texture overrides |
-| `0x30` | `6 × T`   |  | overrides                          | `u16 partIndex`, `u32 newTextureId` |
+| `0x30` |         4 | `u32` | `motionTableId`                    | weenie `MotionTable` (0x09) DAT id, `0` = none (**v2 only**) |
+| `0x34` | `6 × T`   |  | overrides                          | `u16 partIndex`, `u32 newTextureId` |
 
-Total file size:
+Total file size (always written as v2):
 
 ```
-16 + Σ (48 + 6 × T)
+16 + Σ (52 + 6 × T)
 ```
+
+The same formula for a version-1 file uses `48` instead of `52`.
 
 A file with `instanceCount = 0` is a valid 16-byte file meaning "this landblock
 has no instances".
@@ -67,6 +72,9 @@ has no instances".
 ### Appearance semantics (from the ACE world DB)
 
 - `setupId` = `weenie_properties_d_i_d.value` where `type = 1`.
+- `motionTableId` = `weenie_properties_d_i_d.value` where `type = 2`
+  (`PropertyDataId.MotionTable`), `0` = none. The viewer uses it to animate
+  doors, portals, and creatures.
 - `scale` = `weenie_properties_float.value` where `type = 39` (`DefaultScale`),
   else `1.0`.
 - palette override = `weenie_properties_palette (sub_Palette_Id, offset,
@@ -89,7 +97,7 @@ A decoder MUST reject a file that violates any of these:
 
 1. Fewer than 16 bytes.
 2. `magic != "ACLI"`.
-3. `version != 1`.
+3. `version` is neither `1` nor `2`.
 4. `kind != 1`.
 5. `reserved != 0`.
 6. `landblock > 0xFFFF`.
@@ -101,6 +109,15 @@ A decoder MUST reject a file that violates any of these:
 Any layout change MUST increment `version`. Decoders MUST reject unknown
 versions rather than guess.
 
+A decoder MUST accept both version `1` and version `2`:
+
+- `version == 1`: records use the 48-byte base (no `motionTableId`); the decoder
+  reports `motionTableId = 0`.
+- `version == 2`: records use the 52-byte base and read `motionTableId` at
+  record offset `0x30`.
+
+Encoders always write the current version (`2`).
+
 ## Worked header example
 
 Block `0x0125`, 2 records, no overrides:
@@ -108,11 +125,11 @@ Block `0x0125`, 2 records, no overrides:
 ```text
 offset  bytes
 0x0000  41 43 4C 49   magic "ACLI"
-0x0004  01            version 1
+0x0004  02            version 2
 0x0005  01            kind = 1
 0x0006  00 00         reserved
 0x0008  25 01 00 00   landblock = 0x00000125
 0x000C  02 00 00 00   instanceCount = 2
-0x0010  ...           record 0 (48 bytes)
-0x0040  ...           record 1 (48 bytes)
+0x0010  ...           record 0 (52 bytes)
+0x0044  ...           record 1 (52 bytes)
 ```

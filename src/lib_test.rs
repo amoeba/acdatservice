@@ -7,11 +7,11 @@ mod tests {
         parse_dat_param, parse_decimal_or_hex_string, parse_file_id,
         routes::{
             build_batch_multipart, bundle_object_key, check_batch_id_count, encode_multipart_mixed,
-            encode_multipart_mixed_for_dat, parse_batch_ids, parse_bundle_block,
-            parse_file_response_format, parse_file_source, parse_setup_bundle_request,
-            parse_setup_include, parse_setup_part_ids, resolve_extracted_file,
-            setup_bundle_object_key, FileResponseFormat, FileSource, MultipartPart, SetupInclude,
-            MAX_BATCH_IDS, MAX_BATCH_PAYLOAD_BYTES,
+            encode_multipart_mixed_for_dat, landblock_instances_object_key, parse_batch_ids,
+            parse_bundle_block, parse_file_response_format, parse_file_source,
+            parse_setup_bundle_request, parse_setup_include, parse_setup_part_ids,
+            resolve_extracted_file, setup_bundle_object_key, FileResponseFormat, FileSource,
+            MultipartPart, SetupInclude, MAX_BATCH_IDS, MAX_BATCH_PAYLOAD_BYTES,
         },
         DatDatabaseType,
     };
@@ -145,6 +145,18 @@ mod tests {
         assert_eq!(
             bundle_object_key(BundleKind::Envcell, 0x00AE),
             "cell/envcells/0x00AE.bin"
+        );
+    }
+
+    #[test]
+    fn test_landblock_instances_object_key_layout() {
+        assert_eq!(
+            landblock_instances_object_key(0xB34A),
+            "world/landblock-instances/0xB34A.bin"
+        );
+        assert_eq!(
+            landblock_instances_object_key(0x00AE),
+            "world/landblock-instances/0x00AE.bin"
         );
     }
 

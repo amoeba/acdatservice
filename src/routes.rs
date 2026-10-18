@@ -165,6 +165,11 @@ pub(crate) fn setup_bundle_object_key(setup_id: u32) -> String {
     format!("portal/setups/0x{setup_id:08X}.bin")
 }
 
+/// R2 object key for an ACLI landblock-instances file: `world/landblock-instances/0x{block:04X}.bin`.
+pub(crate) fn landblock_instances_object_key(block: u16) -> String {
+    format!("world/landblock-instances/0x{block:04X}.bin")
+}
+
 /// Validate a `/dats/:dat/setups/:id` request and return `(setup_id, object_key)`.
 /// Errors are `(http_status, message)`.
 pub(crate) fn parse_setup_bundle_request(
@@ -549,6 +554,20 @@ pub async fn index_get(_ctx: RouteContext<()>) -> Result<Response> {
                         "Landblock id (0xB34A) or any full file id in the block (0x1E3033D).",
                     ),
                 ],
+            }),
+        },
+    );
+    paths.insert(
+        "/dats/world/landblock-instances/{block}".to_string(),
+        PathItem {
+            get: Some(Operation {
+                summary: "Get landblock instances".to_string(),
+                description: "Returns the ACLI landblock-instances file for one landblock: the ACE world database's static props (fountains, doors, chests, lifestones, and similar), pre-resolved offline into one small blob. The block can be a 16-bit landblock id (0xB34A) or any full file id in the block (0xB34AFFFF); the high word is used. Bytes are served from the pre-extracted R2 bucket as world/landblock-instances/0x{block:04X}.bin.".to_string(),
+                operation_id: "world_instances_get".to_string(),
+                parameters: vec![string_path_parameter(
+                    "block",
+                    "Landblock id (0xB34A) or a full file id in the block (0xB34AFFFF).",
+                )],
             }),
         },
     );
@@ -1360,6 +1379,48 @@ async fn bundle_get(ctx: RouteContext<()>, kind: BundleKind) -> Result<Response>
         return Response::error(
             format!(
                 "No bundle at {object_key}. Generate it with `acdatservice generate` and upload it."
+            ),
+            404,
+        );
+    };
+    let bytes = object
+        .body()
+        .ok_or_else(|| worker::Error::RustError("Empty object body".into()))?
+        .bytes()
+        .await
+        .map_err(|error| {
+            worker::Error::RustError(format!("Failed to read object body: {error}"))
+        })?;
+
+    let mut response = Response::from_bytes(bytes)?;
+    response
+        .headers_mut()
+        .set("Content-Type", "application/octet-stream")?;
+    Ok(with_cors_headers(with_dat_asset_cache_headers(response)?))
+}
+
+/// `GET /dats/world/landblock-instances/{block}`: a precomputed ACLI
+/// landblock-instances file for the ACE world database's static props.
+pub async fn world_instances_get(ctx: RouteContext<()>) -> Result<Response> {
+    let param_block = match ctx.param("block") {
+        Some(value) => value,
+        None => return Response::error("Must specify a landblock id.", 400),
+    };
+    let block = match parse_bundle_block(param_block) {
+        Ok(value) => value,
+        Err(message) => return Response::error(message, 400),
+    };
+
+    let object_key = landblock_instances_object_key(block);
+    let bucket = ctx.bucket("EXTRACTED_BUCKET")?;
+    let object =
+        bucket.get(&object_key).execute().await.map_err(|error| {
+            worker::Error::RustError(format!("Failed to read from R2: {error}"))
+        })?;
+    let Some(object) = object else {
+        return Response::error(
+            format!(
+                "No landblock instances at {object_key}. Generate it with the ac-noclip scripts/gen-landblock-instances.ts tool and upload it to the extracted bucket."
             ),
             404,
         );

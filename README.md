@@ -88,13 +88,13 @@ The output subdirectory mirrors the R2 prefix, so syncing `export/portal/setups/
 publishes the packs beside the per-id files in the extracted bucket (see
 [Pre-extracting Files to R2](#pre-extracting-files-to-r2)).
 
-## Generating landblock instances
+## Generating and publishing landblock instances
 
 The ACE world database places server-side objects — fountains, doors, chests,
 lifestones, and similar static props — that are not in the client DATs. The
 **ACLI** landblock-instances format pre-resolves each instance's model,
 placement, and appearance offline into one small file per landblock, served by
-`/dats/world/landblock-instances/:block` from
+`/dats/world/landblock-instances/:block` from the R2 key
 `world/landblock-instances/0x{block:04X}.bin`. The byte-level format is
 documented in [`docs/landblock-instances-format.md`](./docs/landblock-instances-format.md).
 
@@ -106,10 +106,24 @@ TypeScript tool in ac-noclip:
 npx tsx scripts/gen-landblock-instances.ts --out=export
 ```
 
-The output subdirectory mirrors the R2 prefix, so syncing
-`export/world/landblock-instances/` publishes the files beside the per-id files
-in the extracted bucket (see
-[Pre-extracting Files to R2](#pre-extracting-files-to-r2)).
+The output subdirectory mirrors the R2 prefix. Publish it with
+`scripts/upload_landblock_instances.sh`, which mirrors
+`export/world/landblock-instances/` (override with `SRC_DIR`) to
+`s3://$BUCKET/world/landblock-instances/` using `aws s3 sync --delete`
+(`BUCKET` is required; preview with `DRYRUN=1`):
+
+```sh
+export AWS_ACCESS_KEY_ID=<token-id>
+export AWS_SECRET_ACCESS_KEY=<token-secret>
+export AWS_ENDPOINT_URL=https://<account-id>.r2.cloudflarestorage.com
+
+BUCKET=treestats-acdats-extracted ./scripts/upload_landblock_instances.sh
+DRYRUN=1 ./scripts/upload_landblock_instances.sh   # preview without changes
+```
+
+A run with no generated files refuses to sync rather than deleting the prefix
+(see [Pre-extracting Files to R2](#pre-extracting-files-to-r2) for the shared R2
+setup).
 
 ## Development
 
@@ -194,7 +208,9 @@ done
 Or run `scripts/upload_exported_dats.sh`, a thin wrapper that checks the R2
 environment and mirrors each non-empty `export/<dat>/` (`BUCKET` is required;
 preview with `DRYRUN=1`). `--delete` requires an R2 token with Object Read &
-Write (ListBucket + DeleteObject).
+Write (ListBucket + DeleteObject). The generated `export/world/landblock-instances/`
+tree is published the same way with `scripts/upload_landblock_instances.sh` (see
+[Generating and publishing landblock instances](#generating-and-publishing-landblock-instances)).
 
 After upload, files are addressable at keys like `portal/0x06006957.bin`,
 `cell/0x01000001.bin`, etc. The Worker reads these directly with a single

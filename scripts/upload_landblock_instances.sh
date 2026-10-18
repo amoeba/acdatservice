@@ -2,11 +2,12 @@
 # upload_landblock_instances.sh — Mirror the ACLI landblock-instances tree to R2
 #
 # Mirrors export/world/landblock-instances/ to
-# s3://<bucket>/world/landblock-instances/ with `aws s3 sync --delete`, the
-# rsync --delete equivalent: the bucket prefix becomes an exact mirror of the
-# local tree, so objects that no longer exist locally are removed. The subdir
-# mirrors the R2 prefix read by the `/dats/world/landblock-instances/:block`
-# Worker route (see docs/landblock-instances-format.md).
+# s3://<bucket>/world/landblock-instances/ with `rclone sync` (Cloudflare R2
+# provider), the rsync --delete equivalent: the bucket prefix becomes an exact
+# mirror of the local tree, so objects that no longer exist locally are removed.
+# The subdir mirrors the R2 prefix read by the
+# `/dats/world/landblock-instances/:block` Worker route (see
+# docs/landblock-instances-format.md).
 #
 # Required environment:
 #   BUCKET                  destination R2 bucket name (no default)
@@ -15,12 +16,12 @@
 #   AWS_ENDPOINT_URL        https://<account-id>.r2.cloudflarestorage.com
 # The token needs Object Read & Write (ListBucket + DeleteObject).
 #
+# Requires rclone >= 1.59 (per Cloudflare's R2 docs).
+#
 # Options:
 #   SRC_DIR                 local tree to mirror
 #                           (default: <repo>/export/world/landblock-instances)
-#   AWS_DEFAULT_REGION      R2 region (default: auto)
-#   DRYRUN=1                preview the sync without making changes (adds
-#                           --dryrun to the aws command)
+#   DRYRUN=1                preview the sync without making changes
 #
 # Usage:
 #   BUCKET=treestats-acdats-extracted ./scripts/upload_landblock_instances.sh
@@ -57,8 +58,8 @@ EOF
     exit 1
   fi
 
-  if ! command -v aws >/dev/null 2>&1; then
-    echo "ERROR: aws CLI not found. Install it from https://aws.amazon.com/cli/" >&2
+  if ! command -v rclone >/dev/null 2>&1; then
+    echo "ERROR: rclone not found. Install it from https://rclone.org/install/" >&2
     exit 1
   fi
 }
@@ -82,18 +83,24 @@ if [ "$_count" -eq 0 ]; then
   exit 1
 fi
 
-_extra=""
+_extra="--progress"
 if [ "${DRYRUN:-0}" = 1 ]; then
-  _extra="--dryrun"
+  _extra="--dry-run --progress"
 fi
 
+# rclone wants the endpoint without a trailing slash.
+_endpoint="${AWS_ENDPOINT_URL%/}"
+
 echo "--- $_count files -> s3://$BUCKET/$PREFIX/ ---"
-aws s3 sync "$SRC_DIR" "s3://$BUCKET/$PREFIX/" \
-  --delete \
-  --content-type application/octet-stream \
-  --only-show-errors \
-  --endpoint-url "$AWS_ENDPOINT_URL" \
-  --region "${AWS_DEFAULT_REGION:-auto}" \
+rclone sync "$SRC_DIR" ":s3:$BUCKET/$PREFIX" \
+  --s3-provider Cloudflare \
+  --s3-endpoint "$_endpoint" \
+  --s3-env-auth \
+  --s3-region auto \
+  --s3-no-check-bucket \
+  --transfers 32 \
+  --checkers 64 \
+  --fast-list \
   $_extra
 echo ""
 

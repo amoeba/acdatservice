@@ -39,9 +39,7 @@ file per landblock, so the client can draw them without any database access.
 
 ### Records — `instanceCount` records, back to back
 
-Each version-2 record is **52 bytes** plus `6 × textureCount` override bytes.
-Version-1 records are **48 bytes** plus the same override bytes (they have no
-`motionTableId`).
+Each record is **52 bytes** plus `6 × textureCount` override bytes.
 
 | Offset | Size      | Type  | Field                              | Notes |
 | -----: | --------: | :---- | :--------------------------------- | :---- |
@@ -55,16 +53,14 @@ Version-1 records are **48 bytes** plus the same override bytes (they have no
 | `0x2C` |         1 | `u8`  | `weenieType`                       | ACE WeenieType, for client filtering |
 | `0x2D` |         1 | `u8`  | `flags`                            | bit0 = `is_Link_Child`; rest reserved |
 | `0x2E` |         2 | `u16` | `textureCount` (`T`)               | number of texture overrides |
-| `0x30` |         4 | `u32` | `motionTableId`                    | weenie `MotionTable` (0x09) DAT id, `0` = none (**v2 only**) |
+| `0x30` |         4 | `u32` | `motionTableId`                    | weenie `MotionTable` (0x09) DAT id, `0` = none |
 | `0x34` | `6 × T`   |  | overrides                          | `u16 partIndex`, `u32 newTextureId` |
 
-Total file size (always written as v2):
+Total file size:
 
 ```
 16 + Σ (52 + 6 × T)
 ```
-
-The same formula for a version-1 file uses `48` instead of `52`.
 
 A file with `instanceCount = 0` is a valid 16-byte file meaning "this landblock
 has no instances".
@@ -97,7 +93,7 @@ A decoder MUST reject a file that violates any of these:
 
 1. Fewer than 16 bytes.
 2. `magic != "ACLI"`.
-3. `version` is neither `1` nor `2`.
+3. `version != 2`.
 4. `kind != 1`.
 5. `reserved != 0`.
 6. `landblock > 0xFFFF`.
@@ -106,17 +102,10 @@ A decoder MUST reject a file that violates any of these:
 
 ## Versioning
 
-Any layout change MUST increment `version`. Decoders MUST reject unknown
-versions rather than guess.
-
-A decoder MUST accept both version `1` and version `2`:
-
-- `version == 1`: records use the 48-byte base (no `motionTableId`); the decoder
-  reports `motionTableId = 0`.
-- `version == 2`: records use the 52-byte base and read `motionTableId` at
-  record offset `0x30`.
-
-Encoders always write the current version (`2`).
+Any layout change MUST increment `version`. Encoders always write the current
+version (`2`); decoders MUST reject any other version rather than guess. There
+is no backward-compatibility window: ACLI is not released software, so the
+generator, the service, and the client move together.
 
 ## Worked header example
 

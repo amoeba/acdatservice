@@ -1,6 +1,6 @@
 # ACLI landblock-instances format
 
-Version 2. Status: **draft** — implemented and unit-tested in
+Version 1. Status: **draft** — implemented and unit-tested in
 [`src/landblock_instances.rs`](../src/landblock_instances.rs); written by the
 ac-noclip `scripts/gen-landblock-instances.ts` tool and served by
 `/dats/world/landblock-instances/:block`.
@@ -93,7 +93,7 @@ A decoder MUST reject a file that violates any of these:
 
 1. Fewer than 16 bytes.
 2. `magic != "ACLI"`.
-3. `version != 2`.
+3. `version != 1`.
 4. `kind != 1`.
 5. `reserved != 0`.
 6. `landblock > 0xFFFF`.
@@ -102,10 +102,14 @@ A decoder MUST reject a file that violates any of these:
 
 ## Versioning
 
-Any layout change MUST increment `version`. Encoders always write the current
-version (`2`); decoders MUST reject any other version rather than guess. There
-is no backward-compatibility window: ACLI is not released software, so the
-generator, the service, and the client move together.
+ACLI is **pre-release**. Until it stabilizes, layout changes are made **in
+place**: the `version` byte stays `1`, the R2 tree is regenerated in full, and
+the generator, service and client are updated together. There is no
+compatibility window and no in-place upgrade.
+
+Once ACLI is released, any layout change MUST increment `version`, encoders MUST
+write the current version, and decoders MUST reject any other version rather
+than guess.
 
 ## Worked header example
 
@@ -114,7 +118,7 @@ Block `0x0125`, 2 records, no overrides:
 ```text
 offset  bytes
 0x0000  41 43 4C 49   magic "ACLI"
-0x0004  02            version 2
+0x0004  01            version 1
 0x0005  01            kind = 1
 0x0006  00 00         reserved
 0x0008  25 01 00 00   landblock = 0x00000125

@@ -1,4 +1,4 @@
-//! ACLI landblock-instances format (version 2).
+//! ACLI landblock-instances format (version 1).
 //!
 //! One file describes every server-side object the ACE world database places in
 //! a single landblock (`landblock_instance`): the Meeting Hall mana pool, town
@@ -16,7 +16,7 @@ use std::fmt;
 /// File magic: ASCII `ACLI` as little-endian bytes.
 pub const MAGIC: u32 = u32::from_le_bytes(*b"ACLI");
 /// Format version written by this crate.
-pub const VERSION: u8 = 2;
+pub const VERSION: u8 = 1;
 /// The one-byte kind field for landblock instances.
 pub const KIND: u8 = 1;
 /// Fixed header size in bytes.
@@ -442,7 +442,7 @@ mod tests {
         #[rustfmt::skip]
         let expected: [u8; HEADER_LEN] = [
             0x41, 0x43, 0x4C, 0x49, // magic "ACLI"
-            0x02,                   // version
+            0x01,                   // version
             0x01,                   // kind = landblock instances
             0x00, 0x00,             // reserved
             0x25, 0x01, 0x00, 0x00, // landblock = 0x0125
@@ -481,13 +481,13 @@ mod tests {
         assert_eq!(encoded[record + 44], 42);
         assert_eq!(encoded[record + 45], LANDLOCK_INSTANCE_FLAG_LINK_CHILD);
         assert_eq!(&encoded[record + 46..record + 48], &2u16.to_le_bytes());
-        // v2: motionTableId sits at record offset 0x30.
+        // motionTableId sits at record offset 0x30.
         assert_eq!(
             &encoded[record + 0x30..record + 0x34],
             &0x0900_0007u32.to_le_bytes()
         );
 
-        // v2: texture overrides start at record offset 0x34.
+        // texture overrides start at record offset 0x34.
         let overrides = record + RECORD_BASE;
         assert_eq!(overrides, record + 0x34);
         assert_eq!(&encoded[overrides..overrides + 2], &3u16.to_le_bytes());
@@ -562,7 +562,7 @@ mod tests {
         #[rustfmt::skip]
         let expected_header: [u8; HEADER_LEN] = [
             0x41, 0x43, 0x4C, 0x49, // magic "ACLI"
-            0x02,                   // version
+            0x01,                   // version
             0x01,                   // kind = landblock instances
             0x00, 0x00,             // reserved
             0x25, 0x01, 0x00, 0x00, // landblock = 0x0125

@@ -111,6 +111,12 @@ place**: the `version` byte stays `1`, the R2 tree is regenerated in full, and
 the generator, service and client are updated together. There is no
 compatibility window and no in-place upgrade.
 
+Before uploading a regenerated tree, `scripts/upload_landblock_instances.sh`
+runs `scripts/check_acli_publish.mjs`. That guard requires the deployed
+ac-noclip client's `/acli-layout.json` marker to accept the local record base
+(currently **56** bytes) and rejects legacy 52-byte or mixed trees. Deploy the
+compatible client **before** publishing the tree.
+
 Once ACLI is released, any layout change MUST increment `version`, encoders MUST
 write the current version, and decoders MUST reject any other version rather
 than guess.

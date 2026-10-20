@@ -109,17 +109,31 @@ npx tsx scripts/gen-landblock-instances.ts --out=export
 The output subdirectory mirrors the R2 prefix. Publish it with
 `scripts/upload_landblock_instances.sh`, which mirrors
 `export/world/landblock-instances/` (override with `SRC_DIR`) to
-`s3://$BUCKET/world/landblock-instances/` using `aws s3 sync --delete`
-(`BUCKET` is required; preview with `DRYRUN=1`):
+`s3://$BUCKET/world/landblock-instances/` using `rclone sync` (`BUCKET` is
+required; preview with `DRYRUN=1`).
+
+Before touching R2, the script runs `scripts/check_acli_publish.mjs`. The guard
+refuses to publish unless the deployed ac-noclip client's `/acli-layout.json`
+marker advertises the local **56-byte** record layout and every local file is
+in that layout. This prevents a regenerated ACLI tree from reaching old clients
+that only understand the legacy 52-byte records.
 
 ```sh
 export AWS_ACCESS_KEY_ID=<token-id>
 export AWS_SECRET_ACCESS_KEY=<token-secret>
 export AWS_ENDPOINT_URL=https://<account-id>.r2.cloudflarestorage.com
 
+# Optional: point at a preview client while testing the guard.
+export CLIENT_LAYOUT_URL=https://noclip.treestats.net/acli-layout.json
+
 BUCKET=treestats-acdats-extracted ./scripts/upload_landblock_instances.sh
 DRYRUN=1 ./scripts/upload_landblock_instances.sh   # preview without changes
 ```
+
+**Rollout order:** merge/deploy the client that understands 56-byte records
+first, verify its live marker, then regenerate and publish the tree. The full
+ac-noclip order is documented in
+[`docs/acli-rollout.md`](https://github.com/amoeba/ac-noclip/blob/main/docs/acli-rollout.md).
 
 A run with no generated files refuses to sync rather than deleting the prefix
 (see [Pre-extracting Files to R2](#pre-extracting-files-to-r2) for the shared R2

@@ -29,15 +29,16 @@ applied page settings. Supplying both `after` and `offset` uses cursor paginatio
 
 ## Caching
 
-Successful binary DAT file responses and setup bundles return:
+Successful binary DAT, bundle, and setup-pack responses return:
 
 ```text
-Cache-Control: public, max-age=86400, s-maxage=604800, stale-while-revalidate=86400
+Cache-Control: public, max-age=31536000, immutable
 ```
 
-Browsers can reuse an asset for one day. Shared caches may retain it for one week and serve
-the prior response for one additional day while refreshing it. The service intentionally does
-not mark these URLs `immutable`: publishing a new DAT can change bytes for an existing file ID.
+DAT content and generated bundles are immutable for a given deployment/patch.
+The URL is keyed by DAT id (or landblock / setup id), so a patch that reuses an
+id must invalidate the cache (for example with a purge or a generation prefix)
+when republishing.
 
 ## Generating landblock bundles
 

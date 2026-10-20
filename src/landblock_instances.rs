@@ -23,9 +23,9 @@ pub const KIND: u8 = 1;
 pub const HEADER_LEN: usize = 16;
 /// Fixed portion of one record, before texture overrides.
 ///
-/// Holds a `u32 motionTableId` at offset `0x30`, so texture overrides start at
-/// `0x34`.
-pub const RECORD_BASE: usize = 52;
+/// Holds a `u32 motionTableId` at offset `0x30` and a `u32 physicsScriptId` at
+/// `0x34`, so texture overrides start at `0x38`.
+pub const RECORD_BASE: usize = 56;
 /// Size of one texture override: `u16 partIndex` + `u32 newTextureId`.
 pub const OVERRIDE_LEN: usize = 6;
 
@@ -64,6 +64,8 @@ pub struct LandblockInstance {
     pub flags: u8,
     /// Weenie `MotionTable` (0x09) DAT id, `0` = none.
     pub motion_table_id: u32,
+    /// Weenie `PhysicsScript` (0x33) DAT id, `0` = none.
+    pub physics_script_id: u32,
     /// Texture-map overrides, in source order.
     pub texture_overrides: Vec<TextureOverride>,
 }
@@ -198,6 +200,7 @@ pub fn encode(instances: &LandblockInstances) -> Vec<u8> {
         out.push(instance.flags);
         out.extend_from_slice(&(instance.texture_overrides.len() as u16).to_le_bytes());
         out.extend_from_slice(&instance.motion_table_id.to_le_bytes());
+        out.extend_from_slice(&instance.physics_script_id.to_le_bytes());
         for texture_override in &instance.texture_overrides {
             out.extend_from_slice(&texture_override.part_index.to_le_bytes());
             out.extend_from_slice(&texture_override.texture_id.to_le_bytes());
@@ -264,6 +267,7 @@ pub fn decode(bytes: &[u8]) -> Result<LandblockInstances, LandblockInstancesErro
         let flags = bytes[cursor + 45];
         let texture_count = read_u16(bytes, cursor + 46) as usize;
         let motion_table_id = read_u32(bytes, cursor + 48);
+        let physics_script_id = read_u32(bytes, cursor + 52);
         cursor += RECORD_BASE;
 
         let mut texture_overrides = Vec::with_capacity(texture_count);
@@ -295,6 +299,7 @@ pub fn decode(bytes: &[u8]) -> Result<LandblockInstances, LandblockInstancesErro
             weenie_type,
             flags,
             motion_table_id,
+            physics_script_id,
             texture_overrides,
         });
     }
@@ -372,6 +377,7 @@ mod tests {
             weenie_type: 42,
             flags: LANDLOCK_INSTANCE_FLAG_LINK_CHILD,
             motion_table_id: 0,
+            physics_script_id: 0,
             texture_overrides: overrides,
         }
     }
@@ -401,6 +407,7 @@ mod tests {
             ],
         );
         inst.motion_table_id = 0x0900_0007;
+        inst.physics_script_id = 0x3300_0005;
         LandblockInstances {
             landblock: 0x00AE,
             instances: vec![inst],
@@ -486,10 +493,15 @@ mod tests {
             &encoded[record + 0x30..record + 0x34],
             &0x0900_0007u32.to_le_bytes()
         );
+        // physicsScriptId sits at record offset 0x34.
+        assert_eq!(
+            &encoded[record + 0x34..record + 0x38],
+            &0x3300_0005u32.to_le_bytes()
+        );
 
-        // texture overrides start at record offset 0x34.
+        // texture overrides start at record offset 0x38.
         let overrides = record + RECORD_BASE;
-        assert_eq!(overrides, record + 0x34);
+        assert_eq!(overrides, record + 0x38);
         assert_eq!(&encoded[overrides..overrides + 2], &3u16.to_le_bytes());
         assert_eq!(
             &encoded[overrides + 2..overrides + 6],
@@ -522,8 +534,27 @@ mod tests {
     }
 
     #[test]
+    fn roundtrips_nonzero_physics_script_id() {
+        let instances = LandblockInstances {
+            landblock: 0x00AE,
+            instances: vec![LandblockInstance {
+                physics_script_id: 0x3300_1234,
+                ..instance(0x0200_0043, Vec::new())
+            }],
+        };
+        let encoded = encode(&instances);
+        assert_eq!(
+            &encoded[HEADER_LEN + 0x34..HEADER_LEN + 0x38],
+            &0x3300_1234u32.to_le_bytes()
+        );
+        let decoded = decode(&encoded).unwrap();
+        assert_eq!(decoded, instances);
+        assert_eq!(decoded.instances[0].physics_script_id, 0x3300_1234);
+    }
+
+    #[test]
     fn worked_example_matches_docs() {
-        // Block 0x0125, 2 records, no overrides: header + 2 * 52 bytes.
+        // Block 0x0125, 2 records, no overrides: header + 2 * 56 bytes.
         let instances = LandblockInstances {
             landblock: 0x0125,
             instances: vec![
@@ -538,6 +569,7 @@ mod tests {
                     weenie_type: 0,
                     flags: 0,
                     motion_table_id: 0,
+                    physics_script_id: 0,
                     texture_overrides: Vec::new(),
                 },
                 LandblockInstance {
@@ -551,6 +583,7 @@ mod tests {
                     weenie_type: 0,
                     flags: 0,
                     motion_table_id: 0,
+                    physics_script_id: 0,
                     texture_overrides: Vec::new(),
                 },
             ],

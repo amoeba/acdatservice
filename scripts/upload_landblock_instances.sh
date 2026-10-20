@@ -21,7 +21,13 @@
 # Options:
 #   SRC_DIR                 local tree to mirror
 #                           (default: <repo>/export/world/landblock-instances)
+#   CLIENT_LAYOUT_URL       deployed ac-noclip marker
+#                           (default: https://noclip.treestats.net/acli-layout.json)
 #   DRYRUN=1                preview the sync without making changes
+#
+# Before touching R2, scripts/check_acli_publish.mjs verifies that the deployed
+# client advertises the local 56-byte ACLI layout and that every local file uses
+# it. This prevents publishing new records while an old client is live.
 #
 # Usage:
 #   BUCKET=treestats-acdats-extracted ./scripts/upload_landblock_instances.sh
@@ -32,6 +38,7 @@ set -eu
 BUCKET="${BUCKET:-}"
 ROOT_DIR="$(cd "$(dirname "$0")/.." && pwd)"
 SRC_DIR="${SRC_DIR:-$ROOT_DIR/export/world/landblock-instances}"
+CLIENT_LAYOUT_URL="${CLIENT_LAYOUT_URL:-https://noclip.treestats.net/acli-layout.json}"
 PREFIX="world/landblock-instances"
 
 # ── Environment ─────────────────────────────────────────────────────────
@@ -62,6 +69,11 @@ EOF
     echo "ERROR: rclone not found. Install it from https://rclone.org/install/" >&2
     exit 1
   fi
+
+  if ! command -v node >/dev/null 2>&1; then
+    echo "ERROR: node not found (required for the ACLI publish guard)." >&2
+    exit 1
+  fi
 }
 
 # ── Mirror ──────────────────────────────────────────────────────────────
@@ -82,6 +94,12 @@ if [ "$_count" -eq 0 ]; then
   echo "Refusing to sync --delete from an empty source (it would wipe the prefix)." >&2
   exit 1
 fi
+
+# Hard guard: do not publish a 56-byte tree until the deployed client says it
+# can decode it, and refuse a mixed/legacy local tree.
+node "$ROOT_DIR/scripts/check_acli_publish.mjs" \
+  --src "$SRC_DIR" \
+  --client-url "$CLIENT_LAYOUT_URL"
 
 _extra="--progress"
 if [ "${DRYRUN:-0}" = 1 ]; then

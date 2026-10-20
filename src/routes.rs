@@ -31,8 +31,7 @@ pub(crate) enum FileResponseFormat {
     Json,
 }
 
-pub(crate) const DAT_ASSET_CACHE_CONTROL: &str =
-    "public, max-age=86400, s-maxage=604800, stale-while-revalidate=86400";
+pub(crate) const DAT_ASSET_CACHE_CONTROL: &str = "public, max-age=31536000, immutable";
 pub(crate) const DEFAULT_PAGE_SIZE: usize = 1000;
 pub(crate) const MAX_PAGE_SIZE: usize = 1000;
 

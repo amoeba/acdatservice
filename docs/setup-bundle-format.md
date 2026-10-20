@@ -22,10 +22,9 @@ actually present in the DAT; those are recorded explicitly so a consumer can
 distinguish “known missing” from “not part of this setup”.
 
 The key is the Setup id alone. A DAT patch that changes a Setup's closure keeps
-the id, so the pack must be regenerated and re-uploaded; if it is served behind
-an immutable edge cache, bust the key (for example with a generation prefix)
-when republishing after a patch. The origin route itself uses the shared
-`max-age`/`s-maxage` cache headers rather than `immutable`.
+the id, so the pack must be regenerated and re-uploaded; because the route is
+served `immutable`, bust the key (for example with a generation prefix) or purge
+the cache when republishing after a patch.
 
 This is the setup analogue of the ACLB per-landblock format documented in
 [`docs/bundle-format.md`](./bundle-format.md).

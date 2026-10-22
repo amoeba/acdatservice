@@ -20,7 +20,8 @@
 import fs from "node:fs";
 import path from "node:path";
 
-const RECORD_BASE = 56;
+const RECORD_BASE = 60;
+const PREVIOUS_RECORD_BASE = 56;
 const LEGACY_RECORD_BASE = 52;
 const OVERRIDE_LEN = 6;
 const HEADER_LEN = 16;
@@ -102,11 +103,14 @@ function inspect(bytes) {
   try {
     return { layout: RECORD_BASE, ...parseWith(bytes, RECORD_BASE) };
   } catch (currentError) {
-    try {
-      return { layout: LEGACY_RECORD_BASE, ...parseWith(bytes, LEGACY_RECORD_BASE) };
-    } catch {
-      throw currentError;
+    for (const layout of [PREVIOUS_RECORD_BASE, LEGACY_RECORD_BASE]) {
+      try {
+        return { layout, ...parseWith(bytes, layout) };
+      } catch {
+        // try the next older layout
+      }
     }
+    throw currentError;
   }
 }
 
@@ -140,7 +144,7 @@ function checkTree() {
     }
     if (info.layout !== RECORD_BASE) {
       fail(
-        `${entry.name}: legacy ${info.layout}-byte record layout; ` +
+        `${entry.name}: ${info.layout}-byte record layout; ` +
           `regenerate with the ${RECORD_BASE}-byte generator before publishing`,
       );
     }

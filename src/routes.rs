@@ -1479,7 +1479,13 @@ fn is_hashed_instance_index(name: &str) -> bool {
 /// Only two shapes are served: `manifest.json` (mutable, so revalidated) and a
 /// content-hashed `instance-index-{hash}.bin` (immutable). Anything else is a
 /// 400, which also keeps the key space closed.
-pub async fn instance_index_get(ctx: RouteContext<()>) -> Result<Response> {
+///
+/// The index is stored twice: raw, and brotli-compressed beside it as `.br`
+/// (1,118,332 B -> 122,192 B for the current build). Cloudflare does not
+/// compress `application/octet-stream`, so the precompressed copy is served
+/// with `Content-Encoding: br` to clients that accept it, and the raw copy is
+/// the fallback.
+pub async fn instance_index_get(req: Request, ctx: RouteContext<()>) -> Result<Response> {
     let name = match ctx.param("name") {
         Some(value) => value.as_str(),
         None => return Response::error("Must specify an instance-index file.", 400),
@@ -1495,28 +1501,35 @@ pub async fn instance_index_get(ctx: RouteContext<()>) -> Result<Response> {
         );
     };
 
-    let object_key = format!("{INSTANCE_INDEX_PREFIX}{name}");
+    let accepts_brotli = req
+        .headers()
+        .get("Accept-Encoding")?
+        .map(|value| {
+            value
+                .to_ascii_lowercase()
+                .split(',')
+                .any(|coding| coding.trim().split(';').next() == Some("br"))
+        })
+        .unwrap_or(false);
+
     let bucket = ctx.bucket("EXTRACTED_BUCKET")?;
-    let object =
-        bucket.get(&object_key).execute().await.map_err(|error| {
-            worker::Error::RustError(format!("Failed to read from R2: {error}"))
-        })?;
-    let Some(object) = object else {
-        return Response::error(
-            format!(
-                "No instance index at {object_key}. Generate and upload it with the ac-noclip scripts/gen-instance-index.ts and scripts/upload_instance_index.sh tools."
-            ),
-            404,
-        );
+    let object_key = format!("{INSTANCE_INDEX_PREFIX}{name}");
+    let brotli_key = format!("{object_key}.br");
+
+    let (bytes, content_encoding) = if immutable && accepts_brotli {
+        match read_object(&bucket, &brotli_key).await? {
+            Some(bytes) => (bytes, Some("br")),
+            None => match read_object(&bucket, &object_key).await? {
+                Some(bytes) => (bytes, None),
+                None => return missing_instance_index(&object_key),
+            },
+        }
+    } else {
+        match read_object(&bucket, &object_key).await? {
+            Some(bytes) => (bytes, None),
+            None => return missing_instance_index(&object_key),
+        }
     };
-    let bytes = object
-        .body()
-        .ok_or_else(|| worker::Error::RustError("Empty object body".into()))?
-        .bytes()
-        .await
-        .map_err(|error| {
-            worker::Error::RustError(format!("Failed to read object body: {error}"))
-        })?;
 
     let mut response = Response::from_bytes(bytes)?;
     response.headers_mut().set(
@@ -1535,7 +1548,40 @@ pub async fn instance_index_get(ctx: RouteContext<()>) -> Result<Response> {
             "public, max-age=0, must-revalidate"
         },
     )?;
+    if let Some(encoding) = content_encoding {
+        response.headers_mut().set("Content-Encoding", encoding)?;
+        response.headers_mut().set("Vary", "Accept-Encoding")?;
+    }
     Ok(with_cors_headers(response))
+}
+
+/// Read one R2 object as bytes, or `None` when the key does not exist.
+async fn read_object(bucket: &worker::Bucket, key: &str) -> Result<Option<Vec<u8>>> {
+    let object =
+        bucket.get(key).execute().await.map_err(|error| {
+            worker::Error::RustError(format!("Failed to read from R2: {error}"))
+        })?;
+    let Some(object) = object else {
+        return Ok(None);
+    };
+    let bytes = object
+        .body()
+        .ok_or_else(|| worker::Error::RustError("Empty object body".into()))?
+        .bytes()
+        .await
+        .map_err(|error| {
+            worker::Error::RustError(format!("Failed to read object body: {error}"))
+        })?;
+    Ok(Some(bytes))
+}
+
+fn missing_instance_index(object_key: &str) -> Result<Response> {
+    Response::error(
+        format!(
+            "No instance index at {object_key}. Generate and upload it with the ac-noclip scripts/gen-instance-index.ts and scripts/upload_instance_index.sh tools."
+        ),
+        404,
+    )
 }
 
 /// `GET /dats/portal/setups/{id}`: a precomputed ACSP setup pack.

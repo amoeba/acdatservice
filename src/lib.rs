@@ -128,8 +128,8 @@ async fn fetch(req: Request, env: Env, _ctx: Context) -> Result<Response> {
         .get_async("/dats/world/landblock-instances/:block", |_, ctx| {
             world_instances_get(ctx)
         })
-        .get_async("/dats/world/instance-index/:name", |_, ctx| {
-            instance_index_get(ctx)
+        .get_async("/dats/world/instance-index/:name", |req, ctx| {
+            instance_index_get(req, ctx)
         })
         .get_async("/icons", move |_, ctx| {
             icons_index(icons_index_url.clone(), ctx)

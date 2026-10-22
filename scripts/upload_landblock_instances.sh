@@ -14,6 +14,8 @@
 #   AWS_ACCESS_KEY_ID       R2 S3 token id
 #   AWS_SECRET_ACCESS_KEY   R2 S3 token secret
 #   AWS_ENDPOINT_URL        https://<account-id>.r2.cloudflarestorage.com
+#   PUBLISHER               rclone (default) or wrangler; wrangler needs only a
+#                           `wrangler login` (or CLOUDFLARE_API_TOKEN) and no S3 keys
 # The token needs Object Read & Write (ListBucket + DeleteObject).
 #
 # Requires rclone >= 1.59 (per Cloudflare's R2 docs).
@@ -38,14 +40,23 @@ set -eu
 BUCKET="${BUCKET:-}"
 ROOT_DIR="$(cd "$(dirname "$0")/.." && pwd)"
 SRC_DIR="${SRC_DIR:-$ROOT_DIR/export/world/landblock-instances}"
+# rclone needs R2 S3 keys; wrangler needs `wrangler login` (or an API token) and
+# works when the S3 token has been rotated out.
+PUBLISHER="${PUBLISHER:-rclone}"
+WRANGLER="${WRANGLER:-npx wrangler}"
+PARALLEL="${PARALLEL:-12}"
 CLIENT_LAYOUT_URL="${CLIENT_LAYOUT_URL:-https://noclip.treestats.net/acli-layout.json}"
 PREFIX="world/landblock-instances"
 
 # ── Environment ─────────────────────────────────────────────────────────
 
 check_env() {
+  _required="BUCKET"
+  if [ "$PUBLISHER" = rclone ]; then
+    _required="BUCKET AWS_ACCESS_KEY_ID AWS_SECRET_ACCESS_KEY AWS_ENDPOINT_URL"
+  fi
   _missing=false
-  for _var in BUCKET AWS_ACCESS_KEY_ID AWS_SECRET_ACCESS_KEY AWS_ENDPOINT_URL; do
+  for _var in $_required; do
     eval "_val=\${$_var:-}"
     if [ -z "$_val" ]; then
       echo "ERROR: $_var is not set." >&2
@@ -65,7 +76,7 @@ EOF
     exit 1
   fi
 
-  if ! command -v rclone >/dev/null 2>&1; then
+  if [ "$PUBLISHER" = rclone ] && ! command -v rclone >/dev/null 2>&1; then
     echo "ERROR: rclone not found. Install it from https://rclone.org/install/" >&2
     exit 1
   fi
@@ -95,31 +106,50 @@ if [ "$_count" -eq 0 ]; then
   exit 1
 fi
 
-# Hard guard: do not publish a 56-byte tree until the deployed client says it
-# can decode it, and refuse a mixed/legacy local tree.
+# Hard guard: do not publish a newer-layout tree until the deployed client says
+# it can decode it, and refuse a mixed/legacy local tree.
 node "$ROOT_DIR/scripts/check_acli_publish.mjs" \
   --src "$SRC_DIR" \
   --client-url "$CLIENT_LAYOUT_URL"
 
-_extra="--progress"
-if [ "${DRYRUN:-0}" = 1 ]; then
-  _extra="--dry-run --progress"
+echo "--- $_count files -> s3://$BUCKET/$PREFIX/ (publisher: $PUBLISHER) ---"
+if [ "$PUBLISHER" = wrangler ]; then
+  # No R2 S3 token needed: uses the wrangler login (or CLOUDFLARE_API_TOKEN).
+  # There is no --delete equivalent, so a block that disappears from the source
+  # tree stays in R2; the ACLI block set is stable, so that is acceptable.
+  export BUCKET PREFIX WRANGLER
+  if [ "${DRYRUN:-0}" = 1 ]; then
+    find "$SRC_DIR" -type f -name '*.bin' | head -5 | while read -r _file; do
+      echo "  (dry run) put $PREFIX/$(basename "$_file")"
+    done
+    echo "  (dry run) $_count file(s) total"
+  else
+    find "$SRC_DIR" -type f -name '*.bin' -print0 |
+      xargs -0 -n 1 -P "${PARALLEL:-12}" sh -c '
+        $WRANGLER r2 object put "$BUCKET/$PREFIX/$(basename "$1")" \
+          --file "$1" --remote \
+          --content-type application/octet-stream \
+          --cache-control "public, max-age=31536000, immutable" >/dev/null || exit 255
+      ' _
+  fi
+else
+  _extra="--progress"
+  if [ "${DRYRUN:-0}" = 1 ]; then
+    _extra="--dry-run --progress"
+  fi
+  # rclone wants the endpoint without a trailing slash.
+  _endpoint="${AWS_ENDPOINT_URL%/}"
+  rclone sync "$SRC_DIR" ":s3:$BUCKET/$PREFIX" \
+    --s3-provider Cloudflare \
+    --s3-endpoint "$_endpoint" \
+    --s3-env-auth \
+    --s3-region auto \
+    --s3-no-check-bucket \
+    --transfers 32 \
+    --checkers 64 \
+    --fast-list \
+    $_extra
 fi
-
-# rclone wants the endpoint without a trailing slash.
-_endpoint="${AWS_ENDPOINT_URL%/}"
-
-echo "--- $_count files -> s3://$BUCKET/$PREFIX/ ---"
-rclone sync "$SRC_DIR" ":s3:$BUCKET/$PREFIX" \
-  --s3-provider Cloudflare \
-  --s3-endpoint "$_endpoint" \
-  --s3-env-auth \
-  --s3-region auto \
-  --s3-no-check-bucket \
-  --transfers 32 \
-  --checkers 64 \
-  --fast-list \
-  $_extra
 echo ""
 
 echo "Done. Deploy the worker with: npx wrangler deploy"

@@ -14,6 +14,7 @@ Built with Cloudflare Workers, R2, and D1.
 | [`/dats/cell/landblocks/:block`](https://dats.treestats.net/dats/cell/landblocks/0xB34A) | Get the ACLB landblock bundle (terrain `…FFFF` + LandblockInfo `…FFFE`) for one landblock, served from the pre-extracted R2 bucket as `cell/landblocks/0x{block:04X}.bin`. `:block` accepts a 16-bit landblock id (`0xB34A`) or any full file id in the block (`0xB34AFFFF`). Only the cell DAT has bundles. | [`https://dats.treestats.net/dats/cell/landblocks/0xB34A`](https://dats.treestats.net/dats/cell/landblocks/0xB34A) |
 | [`/dats/cell/envcells/:block`](https://dats.treestats.net/dats/cell/envcells/0xB34A) | Get the ACLB EnvCell bundle for one landblock, served as `cell/envcells/0x{block:04X}.bin`. `:block` accepts a landblock id (`0xB34A`) or any full cell id in it (`0x1E3033D`). Only the cell DAT has bundles. | [`https://dats.treestats.net/dats/cell/envcells/0xB34A`](https://dats.treestats.net/dats/cell/envcells/0xB34A) |
 | [`/dats/world/landblock-instances/:block`](https://dats.treestats.net/dats/world/landblock-instances/0xB34A) | Get the **ACLI** landblock-instances file: the ACE world database's static props (fountains, doors, chests, lifestones, and similar) pre-resolved into one self-describing blob, served from the pre-extracted R2 bucket as `world/landblock-instances/0x{block:04X}.bin`. `:block` accepts a 16-bit landblock id (`0xB34A`) or any full file id in the block (`0xB34AFFFF`). | [`https://dats.treestats.net/dats/world/landblock-instances/0xB34A`](https://dats.treestats.net/dats/world/landblock-instances/0xB34A) |
+| [`/dats/world/instance-index/:name`](https://dats.treestats.net/dats/world/instance-index/manifest.json) | Get the **ACVC** instance index the viewer browses: one row per static landblock instance with its name, landblock, Setup, WeenieType, MotionTable and ACLI ordinal, served from the pre-extracted R2 bucket as `world/instance-index/{name}`. Only `manifest.json` (mutable; revalidated) and `instance-index-{16 hex}.bin` (content-hashed; immutable) are served. The `.bin` is stored raw and brotli (`.bin.br`), and the precompressed copy is served with `Content-Encoding: br` because Cloudflare does not compress `application/octet-stream`: ~120 KB instead of 1.1 MB. | [`https://dats.treestats.net/dats/world/instance-index/manifest.json`](https://dats.treestats.net/dats/world/instance-index/manifest.json) |
 | [`/dats/:dat/setups/:id`](https://dats.treestats.net/dats/portal/setups/0x02001B7F) | Get a precomputed **ACSP** setup pack: a Setup's entire render closure (Setup + GfxObjs + Surfaces + SurfaceTextures + Textures + Palettes) in one object, served from the pre-extracted R2 bucket as `portal/setups/0x{id:08X}.bin`. Only the portal DAT has setup packs. Generate with the ac-noclip `scripts/gen-setup-packs.ts`. | [`https://dats.treestats.net/dats/portal/setups/0x02001B7F`](https://dats.treestats.net/dats/portal/setups/0x02001B7F) |
 | [`/icons`](https://dats.treestats.net/icons) | List icon metadata as paginated JSON Lines (default and maximum limit 1000) | [`https://dats.treestats.net/icons?limit=100&after=0`](https://dats.treestats.net/icons?limit=100&after=0) |
 | [`/icons/:id`](https://dats.treestats.net/icons/26967) | Get icon as PNG | [`https://dats.treestats.net/icons/26967?scale=2`](https://dats.treestats.net/icons/26967?scale=2) |
@@ -135,6 +136,35 @@ DRYRUN=1 ./scripts/upload_landblock_instances.sh   # preview without changes
 first, verify its live marker, then regenerate and publish the tree. The full
 ac-noclip order is documented in
 [`docs/acli-rollout.md`](https://github.com/amoeba/ac-noclip/blob/main/docs/acli-rollout.md).
+
+### Generating and publishing the instance index
+
+The viewer's Instances list needs 66,667 rows of name/block/Setup/WeenieType/
+MotionTable/ordinal. That catalog is too large to inline in the bundle (14.6 MB
+of placements; 6.4 MB as JSON) but tiny as a typed-array index: `ACVC` v1 is
+~1.1 MB raw and **~120 KB brotli**, and decodes with zero per-row allocation.
+
+Generation needs the ACE world DB names (they live on the weenie class, so the
+ACLI tree cannot supply them), so it is a TypeScript tool in ac-noclip that
+shares the ACLI generator's row ordering — the index's `ordinal` column is the
+record's position among a block's instances of that Setup in ACLI (GUID) order,
+which is what `?instance=block:setup:nth` resolves against.
+
+```sh
+# In ac-noclip. Writes <out>/instance-index-{hash}.bin + manifest.json.
+npx tsx scripts/gen-instance-index.ts --out=export/world/instance-index
+npx tsx scripts/gen-instance-index.ts --verify-acli   # check ordinals against the tree
+```
+
+Publish with `scripts/upload_instance_index.sh`, which uploads the hashed file
+as `immutable`, its brotli copy as `instance-index-{hash}.bin.br`, and the
+manifest as `must-revalidate`. It uses `wrangler r2 object put --remote` (note:
+plain `wrangler r2 object` commands default to the local simulated bucket):
+
+```sh
+BUCKET=treestats-acdats-extracted ./scripts/upload_instance_index.sh
+DRYRUN=1 ./scripts/upload_instance_index.sh
+```
 
 A run with no generated files refuses to sync rather than deleting the prefix
 (see [Pre-extracting Files to R2](#pre-extracting-files-to-r2) for the shared R2

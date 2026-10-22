@@ -4,7 +4,7 @@ use acprotocol::dat::reader::{
 use counting_reader::CountingRangeReader;
 use routes::{
     batch_get, dats_index, envcells_get, files_get, files_index, icons_get, icons_index, index_get,
-    landblocks_get, setups_bundle_get, setups_get, world_instances_get,
+    instance_index_get, landblocks_get, setups_bundle_get, setups_get, world_instances_get,
 };
 use std::error::Error;
 use worker::*;
@@ -127,6 +127,9 @@ async fn fetch(req: Request, env: Env, _ctx: Context) -> Result<Response> {
         .get_async("/dats/:dat/setups/:id", |_, ctx| setups_bundle_get(ctx))
         .get_async("/dats/world/landblock-instances/:block", |_, ctx| {
             world_instances_get(ctx)
+        })
+        .get_async("/dats/world/instance-index/:name", |_, ctx| {
+            instance_index_get(ctx)
         })
         .get_async("/icons", move |_, ctx| {
             icons_index(icons_index_url.clone(), ctx)

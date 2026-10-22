@@ -1480,12 +1480,15 @@ fn is_hashed_instance_index(name: &str) -> bool {
 /// content-hashed `instance-index-{hash}.bin` (immutable). Anything else is a
 /// 400, which also keeps the key space closed.
 ///
-/// The index is stored twice: raw, and brotli-compressed beside it as `.br`
-/// (1,118,332 B -> 122,192 B for the current build). Cloudflare does not
-/// compress `application/octet-stream`, so the precompressed copy is served
-/// with `Content-Encoding: br` to clients that accept it, and the raw copy is
-/// the fallback.
-pub async fn instance_index_get(req: Request, ctx: RouteContext<()>) -> Result<Response> {
+/// Bytes are served untouched. Cloudflare's edge does not compress
+/// `application/octet-stream` (verified: the 1,118,332 B index crosses the wire
+/// at full size with every `Accept-Encoding`), and setting `Content-Encoding`
+/// here is unsafe — the edge re-encodes Worker responses and strips the header
+/// on the way out, leaving the client with an undecodable body. So the upload
+/// keeps a gzip sibling (`instance-index-{hash}.bin.gz`, 147,497 B) and the
+/// client fetches it and inflates with `DecompressionStream`, falling back to
+/// the raw asset when it cannot.
+pub async fn instance_index_get(ctx: RouteContext<()>) -> Result<Response> {
     let name = match ctx.param("name") {
         Some(value) => value.as_str(),
         None => return Response::error("Must specify an instance-index file.", 400),
@@ -1496,39 +1499,15 @@ pub async fn instance_index_get(req: Request, ctx: RouteContext<()>) -> Result<R
         true
     } else {
         return Response::error(
-            "Instance index files are manifest.json or instance-index-{16 hex}.bin.",
+            "Instance index files are manifest.json, instance-index-{16 hex}.bin, or its .bin.gz sibling.",
             400,
         );
     };
 
-    let accepts_brotli = req
-        .headers()
-        .get("Accept-Encoding")?
-        .map(|value| {
-            value
-                .to_ascii_lowercase()
-                .split(',')
-                .any(|coding| coding.trim().split(';').next() == Some("br"))
-        })
-        .unwrap_or(false);
-
     let bucket = ctx.bucket("EXTRACTED_BUCKET")?;
     let object_key = format!("{INSTANCE_INDEX_PREFIX}{name}");
-    let brotli_key = format!("{object_key}.br");
-
-    let (bytes, content_encoding) = if immutable && accepts_brotli {
-        match read_object(&bucket, &brotli_key).await? {
-            Some(bytes) => (bytes, Some("br")),
-            None => match read_object(&bucket, &object_key).await? {
-                Some(bytes) => (bytes, None),
-                None => return missing_instance_index(&object_key),
-            },
-        }
-    } else {
-        match read_object(&bucket, &object_key).await? {
-            Some(bytes) => (bytes, None),
-            None => return missing_instance_index(&object_key),
-        }
+    let Some(bytes) = read_object(&bucket, &object_key).await? else {
+        return missing_instance_index(&object_key);
     };
 
     let mut response = Response::from_bytes(bytes)?;
@@ -1548,10 +1527,6 @@ pub async fn instance_index_get(req: Request, ctx: RouteContext<()>) -> Result<R
             "public, max-age=0, must-revalidate"
         },
     )?;
-    if let Some(encoding) = content_encoding {
-        response.headers_mut().set("Content-Encoding", encoding)?;
-        response.headers_mut().set("Vary", "Accept-Encoding")?;
-    }
     Ok(with_cors_headers(response))
 }
 

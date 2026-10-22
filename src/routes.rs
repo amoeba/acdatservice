@@ -1457,12 +1457,15 @@ pub async fn world_instances_get(ctx: RouteContext<()>) -> Result<Response> {
 /// Prefix for the ACVC instance-index artifacts in the extracted bucket.
 pub(crate) const INSTANCE_INDEX_PREFIX: &str = "world/instance-index/";
 
-/// Whether `name` is a content-hashed index file
-/// (`instance-index-{16 hex}.bin`), which is safe to cache forever.
+/// Whether `name` is a content-hashed index file — `instance-index-{16 hex}.bin`
+/// or its gzip sibling `.bin.gz` — both safe to cache forever.
 fn is_hashed_instance_index(name: &str) -> bool {
-    let Some(hash) = name
-        .strip_prefix("instance-index-")
-        .and_then(|rest| rest.strip_suffix(".bin"))
+    let Some(rest) = name.strip_prefix("instance-index-") else {
+        return false;
+    };
+    let Some(hash) = rest
+        .strip_suffix(".bin.gz")
+        .or_else(|| rest.strip_suffix(".bin"))
     else {
         return false;
     };
@@ -1470,6 +1473,38 @@ fn is_hashed_instance_index(name: &str) -> bool {
         && hash
             .bytes()
             .all(|b| b.is_ascii_hexdigit() && !b.is_ascii_uppercase())
+}
+
+#[cfg(test)]
+mod instance_index_name_tests {
+    use super::is_hashed_instance_index;
+
+    #[test]
+    fn accepts_the_raw_and_gzip_hashed_names() {
+        assert!(is_hashed_instance_index(
+            "instance-index-3df8e0353f9e0afe.bin"
+        ));
+        assert!(is_hashed_instance_index(
+            "instance-index-3df8e0353f9e0afe.bin.gz"
+        ));
+    }
+
+    #[test]
+    fn rejects_anything_that_is_not_a_hashed_index_name() {
+        for name in [
+            "manifest.json",
+            "instance-index-.bin",
+            "instance-index-3DF8E0353F9E0AFE.bin",
+            "instance-index-3df8e0353f9e0af.bin",
+            "instance-index-3df8e0353f9e0afe.bin.br",
+            "instance-index-3df8e0353f9e0afe.gz",
+            "instance-index-3df8e0353f9e0afe.bin.gz.gz",
+            "../instance-index-3df8e0353f9e0afe.bin",
+            "instance-index-3df8e0353f9e0afe.txt",
+        ] {
+            assert!(!is_hashed_instance_index(name), "accepted {name}");
+        }
+    }
 }
 
 /// `GET /dats/world/instance-index/{name}`: the ACVC instance index and its

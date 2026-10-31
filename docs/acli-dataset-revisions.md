@@ -55,7 +55,12 @@ BUCKET=treestats-acdats-extracted PUBLISHER=wrangler REVISION=spawns-v1 \
 ```
 
 The nonempty-tree, filename/header, current-layout and deployed-client marker
-guards remain mandatory, including in dryrun. `CLIENT_LAYOUT_URL` can point to
+guards remain mandatory, including in dryrun. The guard unions `featureBits` from
+actual headers and requires the marker's optional `decoderFeatureBits` (default
+zero) to include them; appearance tails require mask value 1 as well as base 60.
+It validates the tail lengths/counts/reserved word, not merely the feature flag.
+See [the appearance format/demo](./landblock-instances-format.md). Future appearance
+datasets must use a new revision; never overwrite `spawns-v1`. `CLIENT_LAYOUT_URL` can point to
 an explicitly verified compatible preview marker; it is not a bypass. The marker
 guard tests decoding compatibility, not whether the new revision client is live,
 so a compatible existing client permits **upload before client deployment**.
@@ -99,8 +104,9 @@ not an automatic proof of completeness. Never use legacy mode for spawns-v1.
 ## Source-only verification
 
 ```sh
-cargo test --lib
-node --test scripts/upload_landblock_instances.test.mjs
+cargo test --lib --tests --examples
+cargo run --example acli_appearance  # synthetic, offline hex demo
+node --test scripts/check_acli_publish.test.mjs scripts/upload_landblock_instances.test.mjs
 sh -n scripts/upload_landblock_instances.sh
 # In ac-noclip (no Playwright/e2e):
 node --import tsx --test src/ac/LandblockInstanceContentSource.test.ts

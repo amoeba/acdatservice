@@ -10,6 +10,7 @@
 //! The byte-level layout is specified in `docs/landblock-instances-format.md`.
 //! This module is pure (no I/O) so the Worker and the CLI share it.
 
+use crate::appearance::{self, Appearance, AppearanceError};
 use std::error::Error;
 use std::fmt;
 
@@ -24,8 +25,10 @@ pub const HEADER_LEN: usize = 16;
 /// Fixed portion of one record, before texture overrides.
 ///
 /// Holds a `u32 motionTableId` at offset `0x30` and a `u32 physicsScriptId` at
-/// `0x34`, so texture overrides start at `0x38`.
-pub const RECORD_BASE: usize = 56;
+/// `0x34`, then `u32 guid` at `0x38`; texture overrides start at `0x3C`.
+pub const RECORD_BASE: usize = 60;
+/// Header feature mask value 1 (bit 0): every record has a sized appearance tail.
+pub const ACLI_FEATURE_APPEARANCE: u16 = 0x0001;
 /// Size of one texture override: `u16 partIndex` + `u32 newTextureId`.
 pub const OVERRIDE_LEN: usize = 6;
 
@@ -66,8 +69,12 @@ pub struct LandblockInstance {
     pub motion_table_id: u32,
     /// Weenie `PhysicsScript` (0x33) DAT id, `0` = none.
     pub physics_script_id: u32,
+    /// Source instance GUID; zero when absent.
+    pub guid: u32,
     /// Texture-map overrides, in source order.
     pub texture_overrides: Vec<TextureOverride>,
+    /// Resolved ordered ObjDesc operations; independent of legacy overrides.
+    pub appearance: Option<Appearance>,
 }
 
 /// A decoded or to-be-encoded landblock-instances file.
@@ -80,13 +87,38 @@ pub struct LandblockInstances {
 }
 
 impl LandblockInstances {
+    /// Feature mask derived from the contents, matching the TypeScript encoder.
+    pub fn feature_bits(&self) -> u16 {
+        if self
+            .instances
+            .iter()
+            .any(|instance| instance.appearance.is_some())
+        {
+            ACLI_FEATURE_APPEARANCE
+        } else {
+            0
+        }
+    }
+
     /// Total encoded size in bytes.
     pub fn encoded_len(&self) -> usize {
+        let has_appearance = self.feature_bits() & ACLI_FEATURE_APPEARANCE != 0;
         HEADER_LEN
             + self
                 .instances
                 .iter()
-                .map(|instance| RECORD_BASE + instance.texture_overrides.len() * OVERRIDE_LEN)
+                .map(|instance| {
+                    RECORD_BASE
+                        + instance.texture_overrides.len() * OVERRIDE_LEN
+                        + if has_appearance {
+                            4 + instance
+                                .appearance
+                                .as_ref()
+                                .map_or(0, Appearance::encoded_len)
+                        } else {
+                            0
+                        }
+                })
                 .sum::<usize>()
     }
 }
@@ -95,15 +127,31 @@ impl LandblockInstances {
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum LandblockInstancesError {
     /// Fewer bytes than the fixed header requires.
-    TooShort { needed: usize, actual: usize },
+    TooShort {
+        needed: usize,
+        actual: usize,
+    },
     /// The first four bytes were not [`MAGIC`].
     BadMagic(u32),
     /// The version byte is not a version this crate understands.
     UnsupportedVersion(u8),
     /// The kind byte is not [`KIND`].
     UnknownKind(u8),
-    /// A reserved field was not zero.
-    ReservedNotZero(u16),
+    /// Header features contain bits this codec does not recognize.
+    UnknownFeatureBits(u16),
+    TruncatedAppearanceLength {
+        record: usize,
+        available: usize,
+    },
+    TruncatedAppearance {
+        record: usize,
+        needed: usize,
+        available: usize,
+    },
+    InvalidAppearance {
+        record: usize,
+        error: AppearanceError,
+    },
     /// The landblock field did not fit in 16 bits.
     LandblockOutOfRange(u32),
     /// The fixed portion of a record runs past the end of the input.
@@ -120,7 +168,9 @@ pub enum LandblockInstancesError {
         available: usize,
     },
     /// There were bytes left over after the last record.
-    TrailingBytes { extra: usize },
+    TrailingBytes {
+        extra: usize,
+    },
 }
 
 impl fmt::Display for LandblockInstancesError {
@@ -141,8 +191,17 @@ impl fmt::Display for LandblockInstancesError {
             LandblockInstancesError::UnknownKind(kind) => {
                 write!(f, "unknown landblock instances kind {kind}")
             }
-            LandblockInstancesError::ReservedNotZero(value) => {
-                write!(f, "reserved header field must be zero, got {value}")
+            LandblockInstancesError::UnknownFeatureBits(value) => {
+                write!(f, "unknown ACLI feature bits: {value:#06x}")
+            }
+            LandblockInstancesError::TruncatedAppearanceLength { record, available } => {
+                write!(f, "appearance size of record {record} needs 4 bytes, only {available} available")
+            }
+            LandblockInstancesError::TruncatedAppearance { record, needed, available } => {
+                write!(f, "appearance of record {record} needs {needed} bytes, only {available} available")
+            }
+            LandblockInstancesError::InvalidAppearance { record, error } => {
+                write!(f, "invalid appearance in record {record}: {error}")
             }
             LandblockInstancesError::LandblockOutOfRange(value) => {
                 write!(f, "landblock {value} does not fit in 16 bits")
@@ -173,16 +232,20 @@ impl fmt::Display for LandblockInstancesError {
 
 impl Error for LandblockInstancesError {}
 
-/// Encode a landblock-instances file.
+/// Encode a landblock-instances file in the current 60-byte layout.
+///
+/// Panics if an instance/operation count cannot fit its wire field.
 pub fn encode(instances: &LandblockInstances) -> Vec<u8> {
+    let count = u32::try_from(instances.instances.len()).expect("too many ACLI instances");
+    let features = instances.feature_bits();
     let mut out = Vec::with_capacity(instances.encoded_len());
 
     out.extend_from_slice(&MAGIC.to_le_bytes());
     out.push(VERSION);
     out.push(KIND);
-    out.extend_from_slice(&0u16.to_le_bytes());
+    out.extend_from_slice(&features.to_le_bytes());
     out.extend_from_slice(&(instances.landblock as u32).to_le_bytes());
-    out.extend_from_slice(&(instances.instances.len() as u32).to_le_bytes());
+    out.extend_from_slice(&count.to_le_bytes());
 
     for instance in &instances.instances {
         out.extend_from_slice(&instance.setup_id.to_le_bytes());
@@ -198,12 +261,27 @@ pub fn encode(instances: &LandblockInstances) -> Vec<u8> {
         out.extend_from_slice(&instance.palette_length.to_le_bytes());
         out.push(instance.weenie_type);
         out.push(instance.flags);
-        out.extend_from_slice(&(instance.texture_overrides.len() as u16).to_le_bytes());
+        let texture_count = u16::try_from(instance.texture_overrides.len())
+            .expect("too many ACLI texture overrides");
+        out.extend_from_slice(&texture_count.to_le_bytes());
         out.extend_from_slice(&instance.motion_table_id.to_le_bytes());
         out.extend_from_slice(&instance.physics_script_id.to_le_bytes());
+        out.extend_from_slice(&instance.guid.to_le_bytes());
         for texture_override in &instance.texture_overrides {
             out.extend_from_slice(&texture_override.part_index.to_le_bytes());
             out.extend_from_slice(&texture_override.texture_id.to_le_bytes());
+        }
+        if features & ACLI_FEATURE_APPEARANCE != 0 {
+            let bytes = instance
+                .appearance
+                .as_ref()
+                .map(appearance::encode)
+                .transpose()
+                .expect("appearance operation count exceeds u16")
+                .unwrap_or_default();
+            let len = u32::try_from(bytes.len()).expect("appearance payload exceeds u32");
+            out.extend_from_slice(&len.to_le_bytes());
+            out.extend_from_slice(&bytes);
         }
     }
 
@@ -233,9 +311,9 @@ pub fn decode(bytes: &[u8]) -> Result<LandblockInstances, LandblockInstancesErro
         return Err(LandblockInstancesError::UnknownKind(kind));
     }
 
-    let reserved = read_u16(bytes, 6);
-    if reserved != 0 {
-        return Err(LandblockInstancesError::ReservedNotZero(reserved));
+    let features = read_u16(bytes, 6);
+    if features & !ACLI_FEATURE_APPEARANCE != 0 {
+        return Err(LandblockInstancesError::UnknownFeatureBits(features));
     }
 
     let raw_landblock = read_u32(bytes, 8);
@@ -245,7 +323,8 @@ pub fn decode(bytes: &[u8]) -> Result<LandblockInstances, LandblockInstancesErro
     let count = read_u32(bytes, 12) as usize;
 
     let mut cursor = HEADER_LEN;
-    let mut instances = Vec::with_capacity(count);
+    // Do not allocate from an untrusted u32 count before checking record bounds.
+    let mut instances = Vec::new();
     for index in 0..count {
         let available = bytes.len().saturating_sub(cursor);
         if available < RECORD_BASE {
@@ -268,6 +347,7 @@ pub fn decode(bytes: &[u8]) -> Result<LandblockInstances, LandblockInstancesErro
         let texture_count = read_u16(bytes, cursor + 46) as usize;
         let motion_table_id = read_u32(bytes, cursor + 48);
         let physics_script_id = read_u32(bytes, cursor + 52);
+        let guid = read_u32(bytes, cursor + 56);
         cursor += RECORD_BASE;
 
         let mut texture_overrides = Vec::with_capacity(texture_count);
@@ -288,6 +368,42 @@ pub fn decode(bytes: &[u8]) -> Result<LandblockInstances, LandblockInstancesErro
             cursor += OVERRIDE_LEN;
         }
 
+        let appearance = if features & ACLI_FEATURE_APPEARANCE != 0 {
+            let available = bytes.len().saturating_sub(cursor);
+            if available < 4 {
+                return Err(LandblockInstancesError::TruncatedAppearanceLength {
+                    record: index,
+                    available,
+                });
+            }
+            let size = read_u32(bytes, cursor) as usize;
+            cursor += 4;
+            let available = bytes.len().saturating_sub(cursor);
+            if size > available {
+                return Err(LandblockInstancesError::TruncatedAppearance {
+                    record: index,
+                    needed: size,
+                    available,
+                });
+            }
+            let value = if size == 0 {
+                None
+            } else {
+                Some(
+                    appearance::decode(&bytes[cursor..cursor + size]).map_err(|error| {
+                        LandblockInstancesError::InvalidAppearance {
+                            record: index,
+                            error,
+                        }
+                    })?,
+                )
+            };
+            cursor += size;
+            value
+        } else {
+            None
+        };
+
         instances.push(LandblockInstance {
             setup_id,
             origin,
@@ -300,7 +416,9 @@ pub fn decode(bytes: &[u8]) -> Result<LandblockInstances, LandblockInstancesErro
             flags,
             motion_table_id,
             physics_script_id,
+            guid,
             texture_overrides,
+            appearance,
         });
     }
 
@@ -378,7 +496,9 @@ mod tests {
             flags: LANDLOCK_INSTANCE_FLAG_LINK_CHILD,
             motion_table_id: 0,
             physics_script_id: 0,
+            guid: 0,
             texture_overrides: overrides,
+            appearance: None,
         }
     }
 
@@ -499,9 +619,10 @@ mod tests {
             &0x3300_0005u32.to_le_bytes()
         );
 
-        // texture overrides start at record offset 0x38.
+        // guid occupies 0x38, so texture overrides start at 0x3C.
+        assert_eq!(&encoded[record + 0x38..record + 0x3C], &0u32.to_le_bytes());
         let overrides = record + RECORD_BASE;
-        assert_eq!(overrides, record + 0x38);
+        assert_eq!(overrides, record + 0x3C);
         assert_eq!(&encoded[overrides..overrides + 2], &3u16.to_le_bytes());
         assert_eq!(
             &encoded[overrides + 2..overrides + 6],
@@ -554,7 +675,7 @@ mod tests {
 
     #[test]
     fn worked_example_matches_docs() {
-        // Block 0x0125, 2 records, no overrides: header + 2 * 56 bytes.
+        // Block 0x0125, 2 records, no overrides: header + 2 * 60 bytes.
         let instances = LandblockInstances {
             landblock: 0x0125,
             instances: vec![
@@ -570,7 +691,9 @@ mod tests {
                     flags: 0,
                     motion_table_id: 0,
                     physics_script_id: 0,
+                    guid: 0,
                     texture_overrides: Vec::new(),
+                    appearance: None,
                 },
                 LandblockInstance {
                     setup_id: 0,
@@ -584,7 +707,9 @@ mod tests {
                     flags: 0,
                     motion_table_id: 0,
                     physics_script_id: 0,
+                    guid: 0,
                     texture_overrides: Vec::new(),
+                    appearance: None,
                 },
             ],
         };
@@ -654,12 +779,12 @@ mod tests {
     }
 
     #[test]
-    fn rejects_nonzero_reserved() {
+    fn rejects_unknown_features() {
         let mut encoded = encode(&plain_instances());
-        encoded[6] = 1;
+        encoded[6..8].copy_from_slice(&0x8002u16.to_le_bytes());
         assert_eq!(
             decode(&encoded),
-            Err(LandblockInstancesError::ReservedNotZero(1))
+            Err(LandblockInstancesError::UnknownFeatureBits(0x8002))
         );
     }
 

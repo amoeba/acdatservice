@@ -35,10 +35,11 @@ if [ "$1" = lsf ] && [ "$MOCK_STATE" = reserved ]; then echo '_publish.json'; fi
 exit 0
 `, { mode: 0o755 });
   fs.symlinkSync(mock, path.join(root, "rclone"));
+  const marker = { format: "ac-noclip/acli-layout", version: 1,
+    kind: 1, decoderRecordBaseBytes: [60] };
   const server = http.createServer((_req, res) => {
     res.setHeader("content-type", "application/json");
-    res.end(JSON.stringify({ format: "ac-noclip/acli-layout", version: 1,
-      kind: 1, decoderRecordBaseBytes: [60] }));
+    res.end(JSON.stringify(marker));
   });
   await new Promise(resolve => server.listen(0, "127.0.0.1", resolve));
   t.after(() => new Promise(resolve => server.close(resolve)));
@@ -52,6 +53,7 @@ exit 0
   delete env.CONFIRM_LEGACY_FULL_TREE;
   return {
     src,
+    marker,
     commands: () => fs.existsSync(log) ? fs.readFileSync(log, "utf8") : "",
     run: (overrides = {}) => new Promise(resolve => {
       const vars = { ...env, ...overrides };
@@ -127,6 +129,21 @@ test("legacy requires explicit full-tree confirmation and retains sync destinati
   assert.equal(result.code, 0, result.output);
   assert.match(f.commands(), /sync .*:s3:test-bucket\/world\/landblock-instances /);
   assert.doesNotMatch(f.commands(), /revisions/);
+});
+
+test("appearance support is checked before any publisher call, including reservation", async t => {
+  const f = await fixture(t);
+  const bytes = Buffer.from(fs.readFileSync(new URL("../tests/fixtures/acli-appearance.hex", import.meta.url), "utf8").trim(), "hex");
+  fs.writeFileSync(path.join(f.src, "0x0125.bin"), bytes);
+  const rejected = await f.run({ DRYRUN: "1" });
+  assert.notEqual(rejected.code, 0, rejected.output);
+  assert.match(rejected.output, /does not accept ACLI featureBits=0x1/);
+  assert.equal(f.commands(), "");
+  f.marker.decoderFeatureBits = 1;
+  const accepted = await f.run({ DRYRUN: "1" });
+  assert.equal(accepted.code, 0, accepted.output);
+  assert.match(accepted.output, /featureBits=0x1/);
+  assert.doesNotMatch(f.commands(), /r2 object put/);
 });
 
 test("empty, malformed, wrong-layout and non-flat trees cannot reach publisher", async t => {

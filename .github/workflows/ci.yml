@@ -39,4 +39,10 @@ jobs:
         run: cargo clippy --locked --all-targets -- -D warnings
 
       - name: Run tests
-        run: cargo test --locked --lib
+        run: cargo test --locked --lib --tests --examples
+
+      - name: Check offline appearance demo against TypeScript fixture
+        run: cargo run --locked --quiet --example acli_appearance | diff - tests/fixtures/acli-appearance.hex
+
+      - name: Test ACLI publish guards (local mocks only)
+        run: node --test scripts/check_acli_publish.test.mjs scripts/upload_landblock_instances.test.mjs

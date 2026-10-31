@@ -164,9 +164,29 @@ pub(crate) fn setup_bundle_object_key(setup_id: u32) -> String {
     format!("portal/setups/0x{setup_id:08X}.bin")
 }
 
-/// R2 object key for an ACLI landblock-instances file: `world/landblock-instances/0x{block:04X}.bin`.
-pub(crate) fn landblock_instances_object_key(block: u16) -> String {
-    format!("world/landblock-instances/0x{block:04X}.bin")
+/// Resolve exactly one ACLI dataset. Never fall back from a revision to legacy.
+pub(crate) fn landblock_instances_object_key(
+    block: u16,
+    revision: Option<&str>,
+) -> std::result::Result<String, String> {
+    match revision {
+        None => Ok(format!("world/landblock-instances/0x{block:04X}.bin")),
+        Some(revision) => {
+            if revision.is_empty()
+                || revision.len() > 64
+                || !revision
+                    .bytes()
+                    .all(|b| b.is_ascii_alphanumeric() || b == b'-' || b == b'_')
+            {
+                return Err(
+                    "revision must be 1-64 ASCII letters, digits, hyphens or underscores".into(),
+                );
+            }
+            Ok(format!(
+                "world/landblock-instances-revisions/{revision}/0x{block:04X}.bin"
+            ))
+        }
+    }
 }
 
 /// Validate a `/dats/:dat/setups/:id` request and return `(setup_id, object_key)`.
@@ -561,12 +581,33 @@ pub async fn index_get(_ctx: RouteContext<()>) -> Result<Response> {
         PathItem {
             get: Some(Operation {
                 summary: "Get landblock instances".to_string(),
-                description: "Returns the ACLI landblock-instances file for one landblock: the ACE world database's static props (fountains, doors, chests, lifestones, and similar), pre-resolved offline into one small blob. The block can be a 16-bit landblock id (0xB34A) or any full file id in the block (0xB34AFFFF); the high word is used. Bytes are served from the pre-extracted R2 bucket as world/landblock-instances/0x{block:04X}.bin.".to_string(),
+                description: "Returns the ACLI landblock-instances file for one landblock: the ACE world database's static props (fountains, doors, chests, lifestones, and similar), pre-resolved offline into one small blob. The block can be a 16-bit landblock id (0xB34A) or any full file id in the block (0xB34AFFFF); the high word is used. Bytes are served from world/landblock-instances/0x{block:04X}.bin by default, or world/landblock-instances-revisions/{revision}/0x{block:04X}.bin with ?revision=. Revisions are 1-64 ASCII letters, digits, hyphens or underscores. Missing revision objects return 404, never legacy data.".to_string(),
                 operation_id: "world_instances_get".to_string(),
-                parameters: vec![string_path_parameter(
-                    "block",
-                    "Landblock id (0xB34A) or a full file id in the block (0xB34AFFFF).",
-                )],
+                parameters: vec![
+                    string_path_parameter(
+                        "block",
+                        "Landblock id (0xB34A) or a full file id in the block (0xB34AFFFF).",
+                    ),
+                    Parameter {
+                        name: "revision".to_string(),
+                        location: "query".to_string(),
+                        description: "Immutable dataset revision; 1-64 ASCII letters, digits, hyphens or underscores. Omit for legacy. Unknown objects return 404 with no fallback.".to_string(),
+                        required: false,
+                        schema: Schema::ObjectSchema {
+                            schema_type: "string".to_string(),
+                            default: None,
+                            minimum: None,
+                            maximum: None,
+                            format: None,
+                            min_length: Some(1),
+                            max_length: Some(64),
+                            read_only: None,
+                            description: None,
+                            properties: None,
+                            required: vec![],
+                        },
+                    },
+                ],
             }),
         },
     );
@@ -1414,7 +1455,7 @@ async fn bundle_get(ctx: RouteContext<()>, kind: BundleKind) -> Result<Response>
 
 /// `GET /dats/world/landblock-instances/{block}`: a precomputed ACLI
 /// landblock-instances file for the ACE world database's static props.
-pub async fn world_instances_get(ctx: RouteContext<()>) -> Result<Response> {
+pub async fn world_instances_get(req: Request, ctx: RouteContext<()>) -> Result<Response> {
     let param_block = match ctx.param("block") {
         Some(value) => value,
         None => return Response::error("Must specify a landblock id.", 400),
@@ -1424,7 +1465,21 @@ pub async fn world_instances_get(ctx: RouteContext<()>) -> Result<Response> {
         Err(message) => return Response::error(message, 400),
     };
 
-    let object_key = landblock_instances_object_key(block);
+    let url = req.url()?;
+    let revisions: Vec<_> = url
+        .query_pairs()
+        .filter(|(key, _)| key == "revision")
+        .collect();
+    if revisions.len() > 1 {
+        return Response::error("revision must be specified at most once", 400);
+    }
+    let object_key = match landblock_instances_object_key(
+        block,
+        revisions.first().map(|(_, value)| value.as_ref()),
+    ) {
+        Ok(key) => key,
+        Err(message) => return Response::error(message, 400),
+    };
     let bucket = ctx.bucket("EXTRACTED_BUCKET")?;
     let object =
         bucket.get(&object_key).execute().await.map_err(|error| {

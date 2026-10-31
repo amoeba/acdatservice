@@ -125,8 +125,8 @@ async fn fetch(req: Request, env: Env, _ctx: Context) -> Result<Response> {
         .get_async("/dats/:dat/landblocks/:block", |_, ctx| landblocks_get(ctx))
         .get_async("/dats/:dat/envcells/:block", |_, ctx| envcells_get(ctx))
         .get_async("/dats/:dat/setups/:id", |_, ctx| setups_bundle_get(ctx))
-        .get_async("/dats/world/landblock-instances/:block", |_, ctx| {
-            world_instances_get(ctx)
+        .get_async("/dats/world/landblock-instances/:block", |req, ctx| {
+            world_instances_get(req, ctx)
         })
         .get_async("/dats/world/instance-index/:name", |_, ctx| {
             instance_index_get(ctx)

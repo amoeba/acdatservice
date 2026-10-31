@@ -97,7 +97,11 @@ lifestones, and similar static props — that are not in the client DATs. The
 **ACLI** landblock-instances format pre-resolves each instance's model,
 placement, and appearance offline into one small file per landblock, served by
 `/dats/world/landblock-instances/:block` from the R2 key
-`world/landblock-instances/0x{block:04X}.bin`. The byte-level format is
+`world/landblock-instances/0x{block:04X}.bin` for legacy callers. With
+`?revision=spawns-v1`, it reads only
+`world/landblock-instances-revisions/spawns-v1/0x{block:04X}.bin` (404 on a miss,
+never stale fallback). See [immutable dataset revisions](./docs/acli-dataset-revisions.md)
+for validation, exact staging commands, overwrite protection and rollback. The byte-level format is
 documented in [`docs/landblock-instances-format.md`](./docs/landblock-instances-format.md).
 
 Like ACSP setup packs, generation needs the ACE world database joins, so it is a
@@ -112,11 +116,14 @@ The output subdirectory mirrors the R2 prefix. Publish it with
 `scripts/upload_landblock_instances.sh`, which mirrors
 `export/world/landblock-instances/` (override with `SRC_DIR`) to
 `s3://$BUCKET/world/landblock-instances/` using `rclone sync` (`BUCKET` is
-required; preview with `DRYRUN=1`).
+required; preview with `DRYRUN=1`). This is **legacy mode**, requiring
+`CONFIRM_LEGACY_FULL_TREE=1` and a verified complete export. For new datasets,
+set `REVISION=spawns-v1` to select the isolated immutable revision prefix;
+revision publication uses copy, never sync/delete.
 
 Before touching R2, the script runs `scripts/check_acli_publish.mjs`. The guard
 refuses to publish unless the deployed ac-noclip client's `/acli-layout.json`
-marker advertises the local **56-byte** record layout and every local file is
+marker advertises the current local record layout and every local file is
 in that layout. This prevents a regenerated ACLI tree from reaching old clients
 that only understand the legacy 52-byte records.
 
@@ -128,12 +135,14 @@ export AWS_ENDPOINT_URL=https://<account-id>.r2.cloudflarestorage.com
 # Optional: point at a preview client while testing the guard.
 export CLIENT_LAYOUT_URL=https://noclip.treestats.net/acli-layout.json
 
-BUCKET=treestats-acdats-extracted ./scripts/upload_landblock_instances.sh
-DRYRUN=1 ./scripts/upload_landblock_instances.sh   # preview without changes
+BUCKET=treestats-acdats-extracted REVISION=spawns-v1 DRYRUN=1 \
+  SRC_DIR=/path/to/ac-noclip/export/spawns-v1/world/landblock-instances \
+  ./scripts/upload_landblock_instances.sh  # preview without changes
 ```
 
-**Rollout order:** merge/deploy the client that understands 56-byte records
-first, verify its live marker, then regenerate and publish the tree. The full
+**Revision rollout order:** with a compatible decoding marker already available,
+finish/audit and upload the revision first, deploy service revision support, then
+deploy the revision-pinned client. Keep the original tree untouched. The full
 ac-noclip order is documented in
 [`docs/acli-rollout.md`](https://github.com/amoeba/ac-noclip/blob/main/docs/acli-rollout.md).
 

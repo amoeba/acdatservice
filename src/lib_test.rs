@@ -151,13 +151,42 @@ mod tests {
     #[test]
     fn test_landblock_instances_object_key_layout() {
         assert_eq!(
-            landblock_instances_object_key(0xB34A),
+            landblock_instances_object_key(0xB34A, None).unwrap(),
             "world/landblock-instances/0xB34A.bin"
         );
         assert_eq!(
-            landblock_instances_object_key(0x00AE),
+            landblock_instances_object_key(0x00AE, None).unwrap(),
             "world/landblock-instances/0x00AE.bin"
         );
+    }
+
+    #[test]
+    fn test_landblock_instances_revision_keys_and_validation() {
+        for revision in ["spawns-v1", "A_z-09", &"a".repeat(64), "unknown"] {
+            assert_eq!(
+                landblock_instances_object_key(0x00AE, Some(revision)).unwrap(),
+                format!("world/landblock-instances-revisions/{revision}/0x00AE.bin")
+            );
+        }
+        for revision in [
+            "",
+            ".",
+            "..",
+            "../legacy",
+            "a/b",
+            "a.b",
+            "a b",
+            "a+b",
+            "%2F",
+            "é",
+            "a\n",
+            &"a".repeat(65),
+        ] {
+            assert!(
+                landblock_instances_object_key(0x0125, Some(revision)).is_err(),
+                "accepted {revision:?}"
+            );
+        }
     }
 
     #[test]

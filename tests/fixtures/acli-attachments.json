@@ -1,0 +1,97 @@
+{
+  "landblock": 4660,
+  "instances": [
+    {
+      "setupId": 33554433,
+      "originX": 1,
+      "originY": 2,
+      "originZ": 3,
+      "quatW": 1,
+      "quatX": 0,
+      "quatY": 0,
+      "quatZ": 0,
+      "scale": 1,
+      "paletteId": 0,
+      "paletteOffset": 0,
+      "paletteLength": 0,
+      "weenieType": 10,
+      "flags": 2,
+      "motionTableId": 0,
+      "physicsScriptId": 0,
+      "textureOverrides": [],
+      "guid": 1
+    },
+    {
+      "setupId": 33554433,
+      "originX": 1,
+      "originY": 2,
+      "originZ": 3,
+      "quatW": 1,
+      "quatX": 0,
+      "quatY": 0,
+      "quatZ": 0,
+      "scale": 1,
+      "paletteId": 0,
+      "paletteOffset": 0,
+      "paletteLength": 0,
+      "weenieType": 10,
+      "flags": 2,
+      "motionTableId": 0,
+      "physicsScriptId": 0,
+      "textureOverrides": [],
+      "guid": 2,
+      "appearance": {
+        "parts": [],
+        "textures": [],
+        "palettes": []
+      }
+    },
+    {
+      "setupId": 33554433,
+      "originX": 1,
+      "originY": 2,
+      "originZ": 3,
+      "quatW": 1,
+      "quatX": 0,
+      "quatY": 0,
+      "quatZ": 0,
+      "scale": 1,
+      "paletteId": 0,
+      "paletteOffset": 0,
+      "paletteLength": 0,
+      "weenieType": 10,
+      "flags": 2,
+      "motionTableId": 0,
+      "physicsScriptId": 0,
+      "textureOverrides": [],
+      "guid": 3,
+      "appearance": {
+        "parts": [],
+        "textures": [],
+        "palettes": [],
+        "attachments": [
+          {
+            "setupId": 33554723,
+            "parentLocation": 3,
+            "placementId": 6,
+            "scale": 1.25,
+            "appearance": {
+              "parts": [],
+              "textures": [],
+              "palettes": [],
+              "paletteBaseId": 67108990,
+              "attachments": [
+                {
+                  "setupId": 33555542,
+                  "parentLocation": 1,
+                  "placementId": 1,
+                  "scale": 0.5
+                }
+              ]
+            }
+          }
+        ]
+      }
+    }
+  ]
+}

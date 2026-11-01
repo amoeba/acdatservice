@@ -9,6 +9,20 @@ pub const HEADER_LEN: usize = 12;
 pub const PART_LEN: usize = 6;
 pub const TEXTURE_LEN: usize = 10;
 pub const PALETTE_LEN: usize = 8;
+pub const ATTACHMENT_LEN: usize = 16;
+pub const MAX_ATTACHMENT_DEPTH: usize = 4;
+pub const MAX_ATTACHMENT_NODES: usize = 32;
+
+/// Held child Setup, resolved independently from its parent's appearance.
+/// Owned Rust values cannot contain cyclic Appearance graphs.
+#[derive(Clone, Debug, PartialEq)]
+pub struct HeldAttachment {
+    pub setup_id: u32,
+    pub parent_location: u16,
+    pub placement_id: u16,
+    pub scale: f32,
+    pub appearance: Option<Appearance>,
+}
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct PartChange {
@@ -34,13 +48,15 @@ pub struct PaletteChange {
     pub length: u16,
 }
 
-#[derive(Clone, Debug, Default, PartialEq, Eq)]
+#[derive(Clone, Debug, Default, PartialEq)]
 pub struct Appearance {
     /// Base palette (0x04) DAT id; zero means absent.
     pub palette_base_id: u32,
     pub parts: Vec<PartChange>,
     pub textures: Vec<TextureChange>,
     pub palettes: Vec<PaletteChange>,
+    /// Empty is the canonical representation of absent optional attachments.
+    pub attachments: Vec<HeldAttachment>,
 }
 
 impl Appearance {
@@ -49,6 +65,13 @@ impl Appearance {
             + self.parts.len() * PART_LEN
             + self.textures.len() * TEXTURE_LEN
             + self.palettes.len() * PALETTE_LEN
+            + self
+                .attachments
+                .iter()
+                .map(|child| {
+                    ATTACHMENT_LEN + child.appearance.as_ref().map_or(0, Appearance::encoded_len)
+                })
+                .sum::<usize>()
     }
 }
 
@@ -58,6 +81,11 @@ pub enum AppearanceError {
     ReservedNotZero(u16),
     InvalidLength { expected: usize, actual: usize },
     TooManyOperations(&'static str),
+    AttachmentsDisabled,
+    AttachmentDepth,
+    AttachmentNodes,
+    InvalidAttachment(&'static str),
+    TruncatedAttachment,
 }
 
 impl fmt::Display for AppearanceError {
@@ -75,25 +103,87 @@ impl fmt::Display for AppearanceError {
                 "appearance operations need exactly {expected} bytes, got {actual}"
             ),
             Self::TooManyOperations(kind) => write!(f, "appearance {kind} count exceeds u16"),
+            Self::AttachmentsDisabled => write!(f, "attachments require feature mask 3"),
+            Self::AttachmentDepth => write!(f, "attachment depth exceeds {MAX_ATTACHMENT_DEPTH}"),
+            Self::AttachmentNodes => write!(f, "attachment nodes exceed {MAX_ATTACHMENT_NODES}"),
+            Self::InvalidAttachment(field) => write!(f, "invalid attachment {field}"),
+            Self::TruncatedAttachment => {
+                write!(f, "truncated attachment header or child appearance")
+            }
         }
     }
 }
 
 impl Error for AppearanceError {}
 
+/// Standalone codec accepts attachments, matching TypeScript. ACLI always passes
+/// the explicit global header mode via `encode_with_attachments`.
 pub fn encode(value: &Appearance) -> Result<Vec<u8>, AppearanceError> {
+    encode_with_attachments(value, true)
+}
+
+pub fn encode_with_attachments(
+    value: &Appearance,
+    enabled: bool,
+) -> Result<Vec<u8>, AppearanceError> {
+    encode_at(value, enabled, 0, &mut 0)
+}
+
+fn check_budget(count: usize, depth: usize, nodes: &mut usize) -> Result<(), AppearanceError> {
+    if count != 0 && depth >= MAX_ATTACHMENT_DEPTH {
+        return Err(AppearanceError::AttachmentDepth);
+    }
+    if count > MAX_ATTACHMENT_NODES - *nodes {
+        return Err(AppearanceError::AttachmentNodes);
+    }
+    *nodes += count;
+    Ok(())
+}
+
+fn check_attachment(
+    setup: u32,
+    parent: u16,
+    placement: u16,
+    scale: f32,
+) -> Result<(), AppearanceError> {
+    if setup >> 24 != 0x02 {
+        return Err(AppearanceError::InvalidAttachment("setup id"));
+    }
+    if !matches!(parent, 1 | 2 | 3 | 8) {
+        return Err(AppearanceError::InvalidAttachment("parent location"));
+    }
+    if !matches!(placement, 1 | 2 | 3 | 6) {
+        return Err(AppearanceError::InvalidAttachment("placement id"));
+    }
+    if !scale.is_finite() || scale <= 0.0 {
+        return Err(AppearanceError::InvalidAttachment("scale"));
+    }
+    Ok(())
+}
+
+fn encode_at(
+    value: &Appearance,
+    enabled: bool,
+    depth: usize,
+    nodes: &mut usize,
+) -> Result<Vec<u8>, AppearanceError> {
+    if !enabled && !value.attachments.is_empty() {
+        return Err(AppearanceError::AttachmentsDisabled);
+    }
+    check_budget(value.attachments.len(), depth, nodes)?;
     let parts =
         u16::try_from(value.parts.len()).map_err(|_| AppearanceError::TooManyOperations("part"))?;
     let textures = u16::try_from(value.textures.len())
         .map_err(|_| AppearanceError::TooManyOperations("texture"))?;
     let palettes = u16::try_from(value.palettes.len())
         .map_err(|_| AppearanceError::TooManyOperations("palette"))?;
-    let mut out = Vec::with_capacity(value.encoded_len());
+    // Do not recursively size an unchecked in-memory graph before depth validation.
+    let mut out = Vec::new();
     out.extend_from_slice(&value.palette_base_id.to_le_bytes());
     out.extend_from_slice(&parts.to_le_bytes());
     out.extend_from_slice(&textures.to_le_bytes());
     out.extend_from_slice(&palettes.to_le_bytes());
-    out.extend_from_slice(&0u16.to_le_bytes());
+    out.extend_from_slice(&(value.attachments.len() as u16).to_le_bytes());
     for part in &value.parts {
         out.extend_from_slice(&part.part_index.to_le_bytes());
         out.extend_from_slice(&part.gfx_obj_id.to_le_bytes());
@@ -108,10 +198,45 @@ pub fn encode(value: &Appearance) -> Result<Vec<u8>, AppearanceError> {
         out.extend_from_slice(&palette.offset.to_le_bytes());
         out.extend_from_slice(&palette.length.to_le_bytes());
     }
+    for child in &value.attachments {
+        check_attachment(
+            child.setup_id,
+            child.parent_location,
+            child.placement_id,
+            child.scale,
+        )?;
+        let bytes = child
+            .appearance
+            .as_ref()
+            .map(|appearance| encode_at(appearance, enabled, depth + 1, nodes))
+            .transpose()?
+            .unwrap_or_default();
+        let size = u32::try_from(bytes.len())
+            .map_err(|_| AppearanceError::InvalidAttachment("appearance length"))?;
+        out.extend_from_slice(&child.setup_id.to_le_bytes());
+        out.extend_from_slice(&child.parent_location.to_le_bytes());
+        out.extend_from_slice(&child.placement_id.to_le_bytes());
+        out.extend_from_slice(&child.scale.to_le_bytes());
+        out.extend_from_slice(&size.to_le_bytes());
+        out.extend_from_slice(&bytes);
+    }
     Ok(out)
 }
 
 pub fn decode(bytes: &[u8]) -> Result<Appearance, AppearanceError> {
+    decode_with_attachments(bytes, true)
+}
+
+pub fn decode_with_attachments(bytes: &[u8], enabled: bool) -> Result<Appearance, AppearanceError> {
+    decode_at(bytes, enabled, 0, &mut 0)
+}
+
+fn decode_at(
+    bytes: &[u8],
+    enabled: bool,
+    depth: usize,
+    nodes: &mut usize,
+) -> Result<Appearance, AppearanceError> {
     if bytes.len() < HEADER_LEN {
         return Err(AppearanceError::TooShort {
             actual: bytes.len(),
@@ -121,17 +246,22 @@ pub fn decode(bytes: &[u8]) -> Result<Appearance, AppearanceError> {
     let textures = read_u16(bytes, 6) as usize;
     let palettes = read_u16(bytes, 8) as usize;
     let reserved = read_u16(bytes, 10);
-    if reserved != 0 {
+    if !enabled && reserved != 0 {
         return Err(AppearanceError::ReservedNotZero(reserved));
     }
     let expected = HEADER_LEN + parts * PART_LEN + textures * TEXTURE_LEN + palettes * PALETTE_LEN;
-    if expected != bytes.len() {
+    if expected > bytes.len() || (reserved == 0 && expected != bytes.len()) {
         return Err(AppearanceError::InvalidLength {
             expected,
             actual: bytes.len(),
         });
     }
-    // Validate the complete bounded payload before allocating from wire counts.
+    let attachments = reserved as usize;
+    check_budget(attachments, depth, nodes)?;
+    if attachments * ATTACHMENT_LEN > bytes.len() - expected {
+        return Err(AppearanceError::TruncatedAttachment);
+    }
+    // Validate operation bounds and attachment budget before allocating from counts.
     let mut value = Appearance {
         palette_base_id: read_u32(bytes, 0),
         ..Appearance::default()
@@ -159,6 +289,40 @@ pub fn decode(bytes: &[u8]) -> Result<Appearance, AppearanceError> {
             length: read_u16(bytes, at + 6),
         });
         at += PALETTE_LEN;
+    }
+    for _ in 0..attachments {
+        if bytes.len() - at < ATTACHMENT_LEN {
+            return Err(AppearanceError::TruncatedAttachment);
+        }
+        let setup_id = read_u32(bytes, at);
+        let parent_location = read_u16(bytes, at + 4);
+        let placement_id = read_u16(bytes, at + 6);
+        let scale = f32::from_le_bytes(bytes[at + 8..at + 12].try_into().unwrap());
+        check_attachment(setup_id, parent_location, placement_id, scale)?;
+        let size = read_u32(bytes, at + 12) as usize;
+        at += ATTACHMENT_LEN;
+        if size > bytes.len() - at {
+            return Err(AppearanceError::TruncatedAttachment);
+        }
+        let appearance = if size == 0 {
+            None
+        } else {
+            Some(decode_at(&bytes[at..at + size], enabled, depth + 1, nodes)?)
+        };
+        at += size;
+        value.attachments.push(HeldAttachment {
+            setup_id,
+            parent_location,
+            placement_id,
+            scale,
+            appearance,
+        });
+    }
+    if at != bytes.len() {
+        return Err(AppearanceError::InvalidLength {
+            expected: at,
+            actual: bytes.len(),
+        });
     }
     Ok(value)
 }
@@ -192,6 +356,7 @@ mod tests {
                 offset: 2,
                 length: 4,
             }],
+            ..Appearance::default()
         }
     }
 
@@ -255,7 +420,10 @@ mod tests {
         }
         let mut bad = bytes;
         bad[10] = 1;
-        assert_eq!(decode(&bad), Err(AppearanceError::ReservedNotZero(1)));
+        assert_eq!(
+            decode_with_attachments(&bad, false),
+            Err(AppearanceError::ReservedNotZero(1))
+        );
     }
 
     #[test]

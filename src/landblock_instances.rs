@@ -29,6 +29,9 @@ pub const HEADER_LEN: usize = 16;
 pub const RECORD_BASE: usize = 60;
 /// Header feature mask value 1 (bit 0): every record has a sized appearance tail.
 pub const ACLI_FEATURE_APPEARANCE: u16 = 0x0001;
+/// Header mask value 2 (bit 1): nested attachments; requires mask value 1.
+pub const ACLI_FEATURE_ATTACHMENTS: u16 = 0x0002;
+pub const ACLI_KNOWN_FEATURES: u16 = ACLI_FEATURE_APPEARANCE | ACLI_FEATURE_ATTACHMENTS;
 /// Size of one texture override: `u16 partIndex` + `u32 newTextureId`.
 pub const OVERRIDE_LEN: usize = 6;
 
@@ -89,15 +92,16 @@ pub struct LandblockInstances {
 impl LandblockInstances {
     /// Feature mask derived from the contents, matching the TypeScript encoder.
     pub fn feature_bits(&self) -> u16 {
-        if self
-            .instances
-            .iter()
-            .any(|instance| instance.appearance.is_some())
-        {
-            ACLI_FEATURE_APPEARANCE
-        } else {
-            0
-        }
+        self.instances.iter().fold(0, |bits, instance| {
+            bits | instance.appearance.as_ref().map_or(0, |appearance| {
+                ACLI_FEATURE_APPEARANCE
+                    | if appearance.attachments.is_empty() {
+                        0
+                    } else {
+                        ACLI_FEATURE_ATTACHMENTS
+                    }
+            })
+        })
     }
 
     /// Total encoded size in bytes.
@@ -139,6 +143,7 @@ pub enum LandblockInstancesError {
     UnknownKind(u8),
     /// Header features contain bits this codec does not recognize.
     UnknownFeatureBits(u16),
+    AttachmentsRequireAppearance,
     TruncatedAppearanceLength {
         record: usize,
         available: usize,
@@ -194,6 +199,9 @@ impl fmt::Display for LandblockInstancesError {
             LandblockInstancesError::UnknownFeatureBits(value) => {
                 write!(f, "unknown ACLI feature bits: {value:#06x}")
             }
+            LandblockInstancesError::AttachmentsRequireAppearance => {
+                write!(f, "attachment feature requires appearance feature")
+            }
             LandblockInstancesError::TruncatedAppearanceLength { record, available } => {
                 write!(f, "appearance size of record {record} needs 4 bytes, only {available} available")
             }
@@ -234,11 +242,12 @@ impl Error for LandblockInstancesError {}
 
 /// Encode a landblock-instances file in the current 60-byte layout.
 ///
-/// Panics if an instance/operation count cannot fit its wire field.
+/// Panics if a count cannot fit its wire field or an appearance is invalid.
 pub fn encode(instances: &LandblockInstances) -> Vec<u8> {
     let count = u32::try_from(instances.instances.len()).expect("too many ACLI instances");
     let features = instances.feature_bits();
-    let mut out = Vec::with_capacity(instances.encoded_len());
+    // Appearance encoders validate depth before traversing nested data.
+    let mut out = Vec::new();
 
     out.extend_from_slice(&MAGIC.to_le_bytes());
     out.push(VERSION);
@@ -275,9 +284,14 @@ pub fn encode(instances: &LandblockInstances) -> Vec<u8> {
             let bytes = instance
                 .appearance
                 .as_ref()
-                .map(appearance::encode)
+                .map(|value| {
+                    appearance::encode_with_attachments(
+                        value,
+                        features & ACLI_FEATURE_ATTACHMENTS != 0,
+                    )
+                })
                 .transpose()
-                .expect("appearance operation count exceeds u16")
+                .expect("invalid or unencodable appearance")
                 .unwrap_or_default();
             let len = u32::try_from(bytes.len()).expect("appearance payload exceeds u32");
             out.extend_from_slice(&len.to_le_bytes());
@@ -312,8 +326,11 @@ pub fn decode(bytes: &[u8]) -> Result<LandblockInstances, LandblockInstancesErro
     }
 
     let features = read_u16(bytes, 6);
-    if features & !ACLI_FEATURE_APPEARANCE != 0 {
+    if features & !ACLI_KNOWN_FEATURES != 0 {
         return Err(LandblockInstancesError::UnknownFeatureBits(features));
+    }
+    if features & ACLI_FEATURE_ATTACHMENTS != 0 && features & ACLI_FEATURE_APPEARANCE == 0 {
+        return Err(LandblockInstancesError::AttachmentsRequireAppearance);
     }
 
     let raw_landblock = read_u32(bytes, 8);
@@ -390,7 +407,11 @@ pub fn decode(bytes: &[u8]) -> Result<LandblockInstances, LandblockInstancesErro
                 None
             } else {
                 Some(
-                    appearance::decode(&bytes[cursor..cursor + size]).map_err(|error| {
+                    appearance::decode_with_attachments(
+                        &bytes[cursor..cursor + size],
+                        features & ACLI_FEATURE_ATTACHMENTS != 0,
+                    )
+                    .map_err(|error| {
                         LandblockInstancesError::InvalidAppearance {
                             record: index,
                             error,

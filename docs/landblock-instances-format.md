@@ -1,138 +1,152 @@
 # ACLI landblock-instances format
 
-Version 1. Status: **draft** — implemented and unit-tested in
-[`src/landblock_instances.rs`](../src/landblock_instances.rs); written by the
-ac-noclip `scripts/gen-landblock-instances.ts` tool and served by
-`/dats/world/landblock-instances/:block`.
+Version **1**, current fixed record base **60 bytes**. Implemented in
+[`src/landblock_instances.rs`](../src/landblock_instances.rs) and
+[`src/appearance.rs`](../src/appearance.rs); the matching TypeScript codecs are
+ac-noclip's `src/ac/acli.ts` and `src/ac/appearance.ts`.
 
-## Why
-
-The ACE **world database** (`ace_world_patches`) places server-side objects
-(`landblock_instance`) that are *not* in the client DATs: the Meeting Hall mana
-pool, town fountains, doors, portals, chests, lifestones, and similar static
-props. This viewer only reads DAT-authored `Stab`s, so those objects are
-missing. ACLI pre-resolves each instance's model + placement + appearance
-(joining the `weenie` / `weenie_properties_*` tables offline) into one small
-file per landblock, so the client can draw them without any database access.
+ACLI pre-resolves ACE world database placements and appearance offline into one
+file per landblock. The Worker serves these bytes unchanged from R2 through
+`/dats/world/landblock-instances/:block`; it does not decode/re-encode files or
+resolve appearance. Dataset selection, immutable caching and rollback are
+specified in [immutable dataset revisions](./acli-dataset-revisions.md).
 
 ## Conventions
 
-- All integers are **little-endian**.
-- File ids / DAT ids are the usual `0x` families: Setup `0x02`, GfxObj `0x01`,
-  Surface `0x08`, SurfaceTexture `0x05`, Texture `0x06`, Palette `0x04`.
-- A file describes exactly **one** landblock.
-- Records are variable length and written in a deterministic order (the
-  generator writes them sorted by source `guid`).
+- All integers and floats are **little-endian**; operation arrays have no padding.
+- One file describes exactly one landblock. Record order and operation order are
+  meaningful: retain authored/layer order; later appearance changes win.
+- DAT id families: Setup `0x02`, GfxObj `0x01`, Surface `0x08`, SurfaceTexture
+  `0x05`, Texture `0x06`, Palette `0x04`. Codecs retain ids verbatim.
+- Palette offsets/lengths are **blocks of eight colors**, not individual colors
+  or bytes. Encoding/decoding does not multiply them by eight.
 
-## Layout
+## Header — 16 bytes
 
-### Header — 16 bytes
+| Offset | Size | Type | Field | Notes |
+| ---: | ---: | :--- | :--- | :--- |
+| `0x00` | 4 | bytes | magic | ASCII `ACLI` |
+| `0x04` | 1 | `u8` | version | `1` |
+| `0x05` | 1 | `u8` | kind | `1` = landblock instances |
+| `0x06` | 2 | `u16` | featureBits | `0`, or `ACLI_FEATURE_APPEARANCE = 0x0001` |
+| `0x08` | 4 | `u32` | landblock | `0..=0xFFFF` |
+| `0x0C` | 4 | `u32` | instanceCount | record count |
 
-| Offset | Size | Type  | Field           | Notes                                      |
-| -----: | ---: | :---- | :-------------- | :----------------------------------------- |
-| `0x00` |    4 | bytes | `magic`         | `41 43 4C 49` = ASCII `ACLI`               |
-| `0x04` |    1 | `u8`  | `version`       | `1`                                        |
-| `0x05` |    1 | `u8`  | `kind`          | `1` = landblock instances                  |
-| `0x06` |    2 | `u16` | `reserved`      | must be `0`                                |
-| `0x08` |    4 | `u32` | `landblock`     | 16-bit block id (`0..=0xFFFF`)             |
-| `0x0C` |    4 | `u32` | `instanceCount` | number of records                          |
+Bytes 6–7 were previously reserved zero. **Mask value 1 (bit 0)** now enables
+appearance tails. This does not change version 1 or the 60-byte record base.
+All other feature bits are unknown and must be rejected, not ignored.
 
-### Records — `instanceCount` records, back to back
+## Records — `instanceCount` records, back to back
 
-Each record is **56 bytes** plus `6 × textureCount` override bytes.
+| Offset | Size | Type | Field | Notes |
+| ---: | ---: | :--- | :--- | :--- |
+| `0x00` | 4 | `u32` | setupId | model id |
+| `0x04` | 12 | 3×`f32` | originX/Y/Z | landblock-local AC coordinates |
+| `0x10` | 16 | 4×`f32` | quatW/X/Y/Z | orientation |
+| `0x20` | 4 | `f32` | scale | DefaultScale, default `1.0` |
+| `0x24` | 4 | `u32` | paletteId | legacy sub-palette, `0` = none |
+| `0x28` | 2 | `u16` | paletteOffset | legacy palette range start, blocks of eight |
+| `0x2A` | 2 | `u16` | paletteLength | legacy palette range length, blocks of eight |
+| `0x2C` | 1 | `u8` | weenieType | ACE WeenieType |
+| `0x2D` | 1 | `u8` | flags | placement flags, retained verbatim |
+| `0x2E` | 2 | `u16` | textureCount (`T`) | legacy texture override count |
+| `0x30` | 4 | `u32` | motionTableId | MotionTable (`0x09`), `0` = none |
+| `0x34` | 4 | `u32` | physicsScriptId | PhysicsScript (`0x33`), `0` = none |
+| `0x38` | 4 | `u32` | guid | source instance GUID, `0` = absent |
+| `0x3C` | `6 × T` | | legacy overrides | each `{u16 partIndex, u32 newTextureId}` |
+| after overrides | 4 | `u32` | appearanceByteLength (`A`) | **only if feature mask 1 is set** |
+| after length | `A` | bytes | appearance | zero length means absent |
 
-| Offset | Size      | Type  | Field                              | Notes |
-| -----: | --------: | :---- | :--------------------------------- | :---- |
-| `0x00` |         4 | `u32` | `setupId`                          | the `0x0200xxxx` model id |
-| `0x04` |        12 | 3×`f32` | `originX`, `originY`, `originZ`  | landblock-local AC coords |
-| `0x10` |        16 | 4×`f32` | `quatW`, `quatX`, `quatY`, `quatZ` | orientation |
-| `0x20` |         4 | `f32` | `scale`                            | weenie `DefaultScale`, `1.0` when absent |
-| `0x24` |         4 | `u32` | `paletteId`                        | sub-palette id, `0` = none |
-| `0x28` |         2 | `u16` | `paletteOffset`                    | ×8 when applied |
-| `0x2A` |         2 | `u16` | `paletteLength`                    | ×8 when applied |
-| `0x2C` |         1 | `u8`  | `weenieType`                       | ACE WeenieType, for client filtering |
-| `0x2D` |         1 | `u8`  | `flags`                            | bit0 = `is_Link_Child`; rest reserved |
-| `0x2E` |         2 | `u16` | `textureCount` (`T`)               | number of texture overrides |
-| `0x30` |         4 | `u32` | `motionTableId`                    | weenie `MotionTable` (0x09) DAT id, `0` = none |
-| `0x34` |         4 | `u32` | `physicsScriptId`                  | weenie `PhysicsScript` (0x33) DAT id, `0` = none |
-| `0x38` | `6 × T`   |  | overrides                          | `u16 partIndex`, `u32 newTextureId` |
-
-Total file size:
+When mask 1 is set, **every record** has its own length word, including records
+without appearance (`A = 0`). No length word exists when mask 1 is clear.
+A present but empty appearance is a **12-byte** payload, distinct from absence.
 
 ```
-16 + Σ (56 + 6 × T)
+featureBits = 0: 16 + Σ (60 + 6 × T)
+featureBits = 1: 16 + Σ (60 + 6 × T + 4 + A)
 ```
 
-A file with `instanceCount = 0` is a valid 16-byte file meaning "this landblock
-has no instances".
+An empty landblock is a valid 16-byte header. Encoders derive featureBits from
+whether any record has a present appearance, matching TypeScript; an explicitly
+flagged file with no present appearances may re-encode with featureBits zero.
+The decoder does not guess legacy layouts when a feature flag identifies tails.
+The Rust codec writes/reads only the current 60-byte base; accepting old 52/56
+layouts is not required. Old files remain servable because routing is raw bytes.
 
-### Appearance semantics (from the ACE world DB)
+## Appearance payload
 
-- `setupId` = `weenie_properties_d_i_d.value` where `type = 1`.
-- `motionTableId` = `weenie_properties_d_i_d.value` where `type = 2`
-  (`PropertyDataId.MotionTable`), `0` = none. The viewer uses it to animate
-  doors, portals, and creatures.
-- `physicsScriptId` = `weenie_properties_d_i_d.value` where `type = 30`
-  (`PropertyDataId.PhysicsScript`), `0` = none. The viewer uses it to drive
-  scripted effects such as portal and door transitions.
-- `scale` = `weenie_properties_float.value` where `type = 39` (`DefaultScale`),
-  else `1.0`.
-- palette override = `weenie_properties_palette (sub_Palette_Id, offset,
-  length)`, applied to the base palette at `offset × 8` for `length × 8`
-  colors (ACE `SubPalette` semantics).
-- texture override = `weenie_properties_texture_map (index, old_Id, new_Id)`
-  where `index` is the **Setup part index**; within that part, surfaces whose
-  texture id equals `old_Id` are replaced by `new_Id`.
+This is a resolved binary ObjDesc operation list, not JSON or raw database rows.
+It follows the legacy overrides without replacing or reinterpreting them.
 
-## Membership
+| Offset | Size | Type | Field |
+| ---: | ---: | :--- | :--- |
+| `0x00` | 4 | `u32` | paletteBaseId (`0` = absent) |
+| `0x04` | 2 | `u16` | partCount (`P`) |
+| `0x06` | 2 | `u16` | textureCount (`X`) |
+| `0x08` | 2 | `u16` | paletteCount (`C`) |
+| `0x0A` | 2 | `u16` | reserved, must be zero |
+| `0x0C` | `6 × P` | | parts: `{u16 partIndex, u32 gfxObjId}` |
+| after parts | `10 × X` | | textures: `{u16 partIndex, u32 oldTextureId, u32 newTextureId}` |
+| after textures | `8 × C` | | palettes: `{u32 paletteId, u16 offset, u16 length}` |
 
-The generator defaults to **static** rows (`landblock_instance.is_Link_Child =
-0`), which is ~67k of ~365k rows; the rest are house hooks and generator
-spawns. `weenieType` is carried so the client can further filter (e.g. drop
-HotSpot `13`, Generator `24`, Creature `10`).
+The payload length must be **exactly `12 + 6×P + 10×X + 8×C`**. Part changes
+replace a Setup part's GfxObj; texture changes are conditional on matching the
+old SurfaceTexture id within that part. Palette ranges remain in blocks of eight.
+Codecs must preserve duplicates and authored order, not sort or deduplicate them.
+`appearance::encode` rejects operation counts above `u16::MAX`. The outer Rust
+`landblock_instances::encode` retains its infallible `Vec<u8>` API and panics
+rather than silently wrapping an unencodable count.
 
-## Invariants
+## Validation and publication contract
 
-A decoder MUST reject a file that violates any of these:
+Reject short/bad headers, unsupported versions/kinds/features, out-of-range
+landblocks, truncated records/overrides/lengths/payloads, nonzero appearance
+reserved words, inconsistent operation lengths/counts, or trailing bytes. Do not
+allocate from an unchecked outer `instanceCount` or retry malformed appearance
+files as an older record base.
 
-1. Fewer than 16 bytes.
-2. `magic != "ACLI"`.
-3. `version != 1`.
-4. `kind != 1`.
-5. `reserved != 0`.
-6. `landblock > 0xFFFF`.
-7. Any record or override runs past the end of the file.
-8. Fewer than `instanceCount` records, or trailing bytes after the last record.
+The publish guard inspects **actual headers** and structurally validates every
+file. It unions required feature bits across the tree (feature-free and flagged
+files may coexist) and requires the deployed marker to accept both base 60 and
+that entire mask. Marker format/version/kind are unchanged:
 
-## Versioning
-
-ACLI is **pre-release**. Until it stabilizes, layout changes are made **in
-place**: the `version` byte stays `1`, the R2 tree is regenerated in full, and
-the generator, service and client are updated together. There is no
-compatibility window and no in-place upgrade.
-
-Before uploading a regenerated tree, `scripts/upload_landblock_instances.sh`
-runs `scripts/check_acli_publish.mjs`. That guard requires the deployed
-ac-noclip client's `/acli-layout.json` marker to accept the local record base
-(currently **56** bytes) and rejects legacy 52-byte or mixed trees. Deploy the
-compatible client **before** publishing the tree.
-
-Once ACLI is released, any layout change MUST increment `version`, encoders MUST
-write the current version, and decoders MUST reject any other version rather
-than guess.
-
-## Worked header example
-
-Block `0x0125`, 2 records, no overrides:
-
-```text
-offset  bytes
-0x0000  41 43 4C 49   magic "ACLI"
-0x0004  01            version 1
-0x0005  01            kind = 1
-0x0006  00 00         reserved
-0x0008  25 01 00 00   landblock = 0x00000125
-0x000C  02 00 00 00   instanceCount = 2
-0x0010  ...           record 0 (56 bytes)
-0x0048  ...           record 1 (56 bytes)
+```json
+{
+  "format": "ac-noclip/acli-layout",
+  "version": 1,
+  "kind": 1,
+  "recordBaseBytes": 60,
+  "decoderRecordBaseBytes": [60, 56, 52],
+  "decoderFeatureBits": 1
+}
 ```
+
+`decoderFeatureBits` is an optional uint16; omitted/null defaults to `0`, matching
+ac-noclip's parser. The guard requires
+`(decoderFeatureBits & requiredFeatureBits) === requiredFeatureBits`. Advertising
+base 60 alone **does not** imply support for appearance. An export manifest may
+record `featureBits: 1`, but it is not trusted instead of reading the actual files.
+Unknown header features or malformed tails fail before publisher commands or a
+revision reservation, even when the marker claims to support those bits.
+
+No data is uploaded by these codec changes. Future appearance data needs a **new
+immutable dataset revision**: do not overwrite `spawns-v1`. Parent coordinates
+compatible client/marker availability, generation, publication and rollout. The
+format marker guard and immutable publication safeguards both remain mandatory.
+
+## Offline demo / cross-language fixture
+
+```sh
+cargo run --example acli_appearance
+cargo test --lib --tests --examples
+node --test scripts/check_acli_publish.test.mjs scripts/upload_landblock_instances.test.mjs
+```
+
+The demo prints 262 bytes as hex and verifies a Rust roundtrip: three synthetic
+records with a nonzero GUID, a legacy override plus full appearance, an absent
+appearance, and a present empty appearance. `tests/fixtures/acli-appearance.hex`
+was independently encoded by the parent TypeScript codec with the same input.
+Rust tests decode and re-encode it byte-for-byte, validate every truncation and
+malformed tail, and retain operation order and palette block units. The example
+can be compared directly with that fixture. Everything is local and synthetic;
+no database, R2, browser/e2e, upload or deployment is needed.

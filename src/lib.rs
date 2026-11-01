@@ -9,6 +9,7 @@ use routes::{
 use std::error::Error;
 use worker::*;
 
+pub mod appearance;
 pub mod bundle;
 mod counting_reader;
 mod db;

@@ -123,9 +123,12 @@ revision publication uses copy, never sync/delete.
 
 Before touching R2, the script runs `scripts/check_acli_publish.mjs`. The guard
 refuses to publish unless the deployed ac-noclip client's `/acli-layout.json`
-marker advertises the current local record layout and every local file is
-in that layout. This prevents a regenerated ACLI tree from reaching old clients
-that only understand the legacy 52-byte records.
+marker advertises the current 60-byte record base **and every feature bit found
+in the actual file headers**. Optional marker `decoderFeatureBits` defaults to
+zero; appearance tails require mask `1`. The guard validates the sized appearance
+payloads as well as the base records. See the
+[format and offline demo](./docs/landblock-instances-format.md). Future appearance
+data must use a new revision, never overwrite `spawns-v1`.
 
 ```sh
 export AWS_ACCESS_KEY_ID=<token-id>

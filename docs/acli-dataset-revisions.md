@@ -58,7 +58,11 @@ The nonempty-tree, filename/header, current-layout and deployed-client marker
 guards remain mandatory, including in dryrun. The guard unions `featureBits` from
 actual headers and requires the marker's optional `decoderFeatureBits` (default
 zero) to include them; appearance tails require mask value 1 as well as base 60.
-It validates the tail lengths/counts/reserved word, not merely the feature flag.
+Held attachments require mask 3 (feature2 requires feature1); `appearance-v1`
+remains readable and must not be overwritten. Deploy decoder/marker support
+before guarded export/publication of a new immutable revision.
+The guard validates tail lengths/counts, feature1 reserved words, and recursive
+attachment fields/depth4/node32 budgets, not merely the feature flag.
 See [the appearance format/demo](./landblock-instances-format.md). Future appearance
 datasets must use a new revision; never overwrite `spawns-v1`. `CLIENT_LAYOUT_URL` can point to
 an explicitly verified compatible preview marker; it is not a bypass. The marker

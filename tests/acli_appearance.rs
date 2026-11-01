@@ -130,7 +130,7 @@ fn feature_bit_requires_a_length_even_when_appearance_is_absent() {
 
 #[test]
 fn unknown_features_and_extreme_counts_fail_without_allocating_from_count() {
-    for features in [2u16, 3, 0x8000, 0xffff] {
+    for features in [4u16, 5, 0x8000, 0xffff] {
         let mut bad = golden();
         bad[6..8].copy_from_slice(&features.to_le_bytes());
         assert_eq!(acli::decode(&bad), Err(Error::UnknownFeatureBits(features)));

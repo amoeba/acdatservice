@@ -11,7 +11,8 @@
  *      with a filename whose block id matches the file header.
  *
  * decoderFeatureBits is an optional uint16 marker mask (missing/null = 0),
- * matching ac-noclip's parser. Appearance is mask value 1 (bit 0).
+ * matching ac-noclip's parser. Appearance is mask value 1 (bit 0);
+ * attachments add mask value 2 (bit 1) and require both bits.
  *
  * Usage:
  *   node scripts/check_acli_publish.mjs \
@@ -29,6 +30,10 @@ const LEGACY_RECORD_BASE = 52;
 const OVERRIDE_LEN = 6;
 const HEADER_LEN = 16;
 const ACLI_FEATURE_APPEARANCE = 0x0001;
+const ACLI_FEATURE_ATTACHMENTS = 0x0002;
+const ACLI_KNOWN_FEATURES = 0x0003;
+const MAX_ATTACHMENT_DEPTH = 4;
+const MAX_ATTACHMENT_NODES = 32;
 const MARKER_FORMAT = "ac-noclip/acli-layout";
 const MARKER_VERSION = 1;
 const MARKER_KIND = 1;
@@ -70,14 +75,34 @@ function u32(bytes, at) {
   );
 }
 
-/** Validate the exact resolved appearance payload, including its reserved word. */
-function checkAppearance(bytes) {
+/** Validate a bounded root appearance; the node budget is shared by all siblings. */
+function checkAppearance(bytes, enabled, depth = 0, budget = { nodes: 0 }) {
   if (bytes.length < 12) throw new Error("truncated appearance header");
-  if (u16(bytes, 10) !== 0) throw new Error("appearance reserved field is not zero");
+  const count = u16(bytes, 10);
+  if (!enabled && count !== 0) throw new Error("appearance reserved field is not zero");
   const expected = 12 + u16(bytes, 4) * 6 + u16(bytes, 6) * 10 + u16(bytes, 8) * 8;
-  if (expected !== bytes.length) {
+  if (expected > bytes.length || (count === 0 && expected !== bytes.length)) {
     throw new Error(`invalid appearance operation length: expected ${expected}, got ${bytes.length}`);
   }
+  if (count !== 0 && depth >= MAX_ATTACHMENT_DEPTH) throw new Error("attachment depth exceeds 4");
+  budget.nodes += count;
+  if (budget.nodes > MAX_ATTACHMENT_NODES) throw new Error("attachment nodes exceed 32");
+  let at = expected;
+  if (count * 16 > bytes.length - at) throw new Error("truncated attachments");
+  for (let i = 0; i < count; i++) {
+    if (bytes.length - at < 16) throw new Error("truncated attachment header");
+    if ((u32(bytes, at) >>> 24) !== 0x02) throw new Error("invalid attachment setup id");
+    if (![1, 2, 3, 8].includes(u16(bytes, at + 4))) throw new Error("invalid attachment parent location");
+    if (![1, 2, 3, 6].includes(u16(bytes, at + 6))) throw new Error("invalid attachment placement id");
+    const scale = bytes.readFloatLE(at + 8);
+    if (!Number.isFinite(scale) || scale <= 0) throw new Error("invalid attachment scale");
+    const size = u32(bytes, at + 12);
+    at += 16;
+    if (size > bytes.length - at) throw new Error("truncated child appearance");
+    if (size !== 0) checkAppearance(bytes.subarray(at, at + size), enabled, depth + 1, budget);
+    at += size;
+  }
+  if (at !== bytes.length) throw new Error("trailing appearance bytes");
 }
 
 /** Parse a file strictly with one record base, or throw. */
@@ -94,8 +119,11 @@ function parseWith(bytes, recordBase) {
   if (bytes[4] !== 1) throw new Error(`unsupported ACLI version ${bytes[4]}`);
   if (bytes[5] !== 1) throw new Error(`invalid ACLI kind ${bytes[5]}`);
   const featureBits = u16(bytes, 6);
-  if ((featureBits & ~ACLI_FEATURE_APPEARANCE) !== 0) {
+  if ((featureBits & ~ACLI_KNOWN_FEATURES) !== 0) {
     throw new Error(`unknown ACLI feature bits 0x${featureBits.toString(16)}`);
+  }
+  if ((featureBits & ACLI_FEATURE_ATTACHMENTS) && !(featureBits & ACLI_FEATURE_APPEARANCE)) {
+    throw new Error("attachment feature requires appearance feature");
   }
   if (featureBits !== 0 && recordBase !== RECORD_BASE) {
     throw new Error("appearance features require the 60-byte record base");
@@ -119,7 +147,7 @@ function parseWith(bytes, recordBase) {
       if (size > bytes.length - at) throw new Error(`truncated appearance in record ${i}`);
       if (size !== 0) {
         try {
-          checkAppearance(bytes.subarray(at, at + size));
+          checkAppearance(bytes.subarray(at, at + size), Boolean(featureBits & ACLI_FEATURE_ATTACHMENTS));
         } catch (error) {
           throw new Error(`record ${i}: ${error.message}`);
         }

@@ -131,6 +131,34 @@ test("legacy requires explicit full-tree confirmation and retains sync destinati
   assert.doesNotMatch(f.commands(), /revisions/);
 });
 
+test("attachments require deployed mask3 before any rclone/Wrangler call or reservation", async t => {
+  const f = await fixture(t);
+  const bytes = Buffer.from(fs.readFileSync(new URL("../tests/fixtures/acli-attachments.hex", import.meta.url), "utf8").trim(), "hex");
+  fs.rmSync(path.join(f.src, "0x0125.bin"));
+  fs.writeFileSync(path.join(f.src, "0x1234.bin"), bytes);
+  f.marker.decoderFeatureBits = 1;
+  for (const PUBLISHER of ["rclone", "wrangler"]) {
+    for (const DRYRUN of ["0", "1"]) {
+      const rejected = await f.run({ PUBLISHER, DRYRUN });
+      assert.notEqual(rejected.code, 0, rejected.output);
+      assert.match(rejected.output, /does not accept ACLI featureBits=0x3/);
+      assert.equal(f.commands(), "");
+    }
+  }
+  // Even a compatible marker cannot permit invalid recursive data.
+  f.marker.decoderFeatureBits = 3;
+  const invalid = Buffer.from(bytes); invalid.writeFloatLE(Infinity, 240);
+  fs.writeFileSync(path.join(f.src, "0x1234.bin"), invalid);
+  const rejected = await f.run({ PUBLISHER: "rclone" });
+  assert.notEqual(rejected.code, 0, rejected.output);
+  assert.equal(f.commands(), "");
+  fs.writeFileSync(path.join(f.src, "0x1234.bin"), bytes);
+  const accepted = await f.run({ PUBLISHER: "rclone", DRYRUN: "1" });
+  assert.equal(accepted.code, 0, accepted.output);
+  assert.match(f.commands(), /copy .*--immutable/);
+  assert.doesNotMatch(f.commands(), /copyto|sync /);
+});
+
 test("appearance support is checked before any publisher call, including reservation", async t => {
   const f = await fixture(t);
   const bytes = Buffer.from(fs.readFileSync(new URL("../tests/fixtures/acli-appearance.hex", import.meta.url), "utf8").trim(), "hex");

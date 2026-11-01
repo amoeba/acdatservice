@@ -39,6 +39,7 @@ fn main() {
                 offset: 2,
                 length: 4,
             }],
+            ..Appearance::default()
         }),
     };
     let mut absent = first.clone();

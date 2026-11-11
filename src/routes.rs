@@ -1761,7 +1761,9 @@ pub async fn area_pack_get(req: Request, ctx: RouteContext<()>) -> Result<Respon
         .body()
         .ok_or_else(|| worker::Error::RustError("Empty area-pack object body".into()))?
         .response_body()?;
-    let mut response = Response::from_body(body)?;
+    // R2 already contains Brotli bytes: Workers' automatic encoding would
+    // compress them a second time and browsers would receive undecoded packs.
+    let mut response = Response::from_body(body)?.with_encode_body(EncodeBody::Manual);
     let headers = response.headers_mut();
     headers.set("Content-Type", "application/octet-stream")?;
     headers.set("Cache-Control", DAT_ASSET_CACHE_CONTROL)?;

@@ -28,16 +28,16 @@ export async function checkAreaPackDelivery(url, expectedBytes) {
   return results;
 }
 
-function validateCatalog(catalog) {
+export function validateCatalog(catalog) {
   assert.ok(catalog && typeof catalog === 'object' && !Array.isArray(catalog), 'Catalog must be a JSON object');
   const entries = [];
   for (const [key, d] of Object.entries(catalog)) {
     assert.ok(d && typeof d === 'object' && !Array.isArray(d), `Invalid descriptor: ${key}`);
     assert.match(d.file ?? '', /^area-[a-f0-9]{64}\.bin$/, `Invalid filename: ${key}`);
     assert.ok(Number.isSafeInteger(d.bytes) && d.bytes >= 0, `Invalid bytes: ${key}`);
-    assert.ok(Number.isSafeInteger(d.areaId) && d.areaId >= 0, `Invalid areaId: ${key}`);
-    assert.ok(Number.isSafeInteger(d.blocks) && d.blocks >= 0, `Invalid blocks: ${key}`);
-    assert.ok(Number.isSafeInteger(d.acliRevision) && d.acliRevision >= 0, `Invalid acliRevision: ${key}`);
+    assert.ok(typeof d.areaId === 'string' && /^[a-z0-9][a-z0-9_-]{0,63}$/.test(d.areaId), `Invalid areaId: ${key}`);
+    assert.ok(Array.isArray(d.blocks) && d.blocks.every(n => Number.isInteger(n) && n >= 0 && n <= 0xffff) && new Set(d.blocks).size === d.blocks.length, `Invalid blocks: ${key}`);
+    assert.ok(typeof d.acliRevision === 'string' && /^[A-Za-z0-9_-]{1,64}$/.test(d.acliRevision), `Invalid acliRevision: ${key}`);
     if (d.cellRanges !== undefined) {
       assert.ok(Array.isArray(d.cellRanges), `Invalid cellRanges: ${key}`);
       for (const r of d.cellRanges) assert.ok(Array.isArray(r) && r.length === 2 && r.every(n => Number.isInteger(n) && n >= 0 && n <= 0xffffffff) && r[0] <= r[1], `Invalid cell range: ${key}`);

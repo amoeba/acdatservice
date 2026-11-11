@@ -626,6 +626,20 @@ pub async fn index_get(_ctx: RouteContext<()>) -> Result<Response> {
         },
     );
     paths.insert(
+        "/dats/world/area-packs/{name}".to_string(),
+        PathItem {
+            get: Some(Operation {
+                summary: "Get a time-lapse area pack".to_string(),
+                description: "Returns an immutable raw DAT area pack named area-{64 lowercase hex}.bin from world/area-packs/. When the client accepts Brotli and a .br object exists, streams that precompressed representation with Content-Encoding: br; otherwise streams the raw pack.".to_string(),
+                operation_id: "area_pack_get".to_string(),
+                parameters: vec![string_path_parameter(
+                    "name",
+                    "Content-addressed filename: area-{64 lowercase hex}.bin.",
+                )],
+            }),
+        },
+    );
+    paths.insert(
         "/dats/{dat}/setups/{id}".to_string(),
         PathItem {
             get: Some(Operation {
@@ -1531,6 +1545,48 @@ fn is_hashed_instance_index(name: &str) -> bool {
 }
 
 #[cfg(test)]
+mod area_pack_tests {
+    use super::{accepts_brotli, is_area_pack_name};
+
+    #[test]
+    fn accepts_only_content_addressed_area_pack_filenames() {
+        let valid = format!("area-{}.bin", "a1".repeat(32));
+        assert!(is_area_pack_name(&valid));
+        for name in [
+            "area-.bin",
+            "area-0123456789abcdef0123456789abcdef0123456789abcdef0123456789ABCDEf.bin",
+            "area-0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcde.bin",
+            "area-0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef.bin.br",
+            "../area-0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef.bin",
+        ] {
+            assert!(!is_area_pack_name(name), "accepted {name}");
+        }
+    }
+
+    #[test]
+    fn parses_brotli_acceptance_and_quality() {
+        for accepted in [
+            Some("br"),
+            Some("gzip, br"),
+            Some("br;q=0.5"),
+            Some("*;q=1"),
+        ] {
+            assert!(accepts_brotli(accepted), "did not accept {accepted:?}");
+        }
+        for rejected in [
+            None,
+            Some("gzip"),
+            Some("br;q=0"),
+            Some("BR ; Q=0"),
+            Some("*;q=1, br;q=0"),
+            Some("br;q=1.1"),
+        ] {
+            assert!(!accepts_brotli(rejected), "accepted {rejected:?}");
+        }
+    }
+}
+
+#[cfg(test)]
 mod instance_index_name_tests {
     use super::is_hashed_instance_index;
 
@@ -1618,6 +1674,104 @@ pub async fn instance_index_get(ctx: RouteContext<()>) -> Result<Response> {
         },
     )?;
     Ok(with_cors_headers(response))
+}
+
+/// Whether an Accept-Encoding field allows Brotli. An explicit `br` token takes
+/// precedence over `*`; q=0 (including case/whitespace variants) disallows it.
+fn accepts_brotli(value: Option<&str>) -> bool {
+    let Some(value) = value else { return false };
+    let mut wildcard = None;
+    for item in value.split(',') {
+        let mut parts = item.trim().split(';');
+        let coding = parts.next().unwrap_or("").trim();
+        if coding.is_empty() {
+            continue;
+        }
+        let quality = parts
+            .filter_map(|part| {
+                let (key, value) = part.trim().split_once('=')?;
+                key.trim().eq_ignore_ascii_case("q").then_some(value.trim())
+            })
+            .next()
+            .and_then(|q| q.parse::<f32>().ok())
+            .unwrap_or(1.0);
+        let allowed = quality > 0.0 && quality <= 1.0;
+        if coding.eq_ignore_ascii_case("br") {
+            return allowed;
+        }
+        if coding == "*" {
+            wildcard = Some(allowed);
+        }
+    }
+    wildcard.unwrap_or(false)
+}
+
+fn is_area_pack_name(name: &str) -> bool {
+    name.strip_prefix("area-")
+        .and_then(|rest| rest.strip_suffix(".bin"))
+        .is_some_and(|hash| {
+            hash.len() == 64
+                && hash
+                    .bytes()
+                    .all(|b| b.is_ascii_digit() || (b'a'..=b'f').contains(&b))
+        })
+}
+
+/// `GET /dats/world/area-packs/{name}` streams immutable raw DAT area packs,
+/// selecting their precompressed Brotli representation when accepted.
+pub async fn area_pack_get(req: Request, ctx: RouteContext<()>) -> Result<Response> {
+    let Some(name) = ctx.param("name").map(|value| value.as_str()) else {
+        return Response::error("Must specify an area-pack filename.", 400);
+    };
+    if !is_area_pack_name(name) {
+        return Response::error(
+            "Area-pack filenames must be area-{64 lowercase hex}.bin.",
+            400,
+        );
+    }
+
+    let bucket = ctx.bucket("EXTRACTED_BUCKET")?;
+    let use_brotli = accepts_brotli(req.headers().get("Accept-Encoding")?.as_deref());
+    let br_key = format!("world/area-packs/{name}.br");
+    let selected =
+        if use_brotli {
+            bucket.get(&br_key).execute().await.map_err(|error| {
+                worker::Error::RustError(format!("Failed to read from R2: {error}"))
+            })?
+        } else {
+            None
+        };
+    let (object, compressed) = match selected {
+        Some(object) => (object, true),
+        None => {
+            let key = format!("world/area-packs/{name}");
+            let object = bucket.get(&key).execute().await.map_err(|error| {
+                worker::Error::RustError(format!("Failed to read from R2: {error}"))
+            })?;
+            let Some(object) = object else {
+                let mut response = Response::error("Area pack not found.", 404)?;
+                response.headers_mut().set("Cache-Control", "no-store")?;
+                return Ok(response);
+            };
+            (object, false)
+        }
+    };
+
+    let body = object
+        .body()
+        .ok_or_else(|| worker::Error::RustError("Empty area-pack object body".into()))?
+        .response_body()?;
+    let mut response = Response::from_body(body)?;
+    let headers = response.headers_mut();
+    headers.set("Content-Type", "application/octet-stream")?;
+    headers.set("Cache-Control", DAT_ASSET_CACHE_CONTROL)?;
+    headers.set("Vary", "Accept-Encoding")?;
+    headers.set("Content-Length", &object.size().to_string())?;
+    headers.set("ETag", &object.http_etag())?;
+    if compressed {
+        headers.set("Content-Encoding", "br")?;
+    }
+    Ok(response)
 }
 
 /// Read one R2 object as bytes, or `None` when the key does not exist.

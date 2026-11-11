@@ -629,8 +629,8 @@ pub async fn index_get(_ctx: RouteContext<()>) -> Result<Response> {
         "/dats/world/area-packs/{name}".to_string(),
         PathItem {
             get: Some(Operation {
-                summary: "Get a time-lapse area pack".to_string(),
-                description: "Returns an immutable raw DAT area pack named area-{64 lowercase hex}.bin from world/area-packs/. When the client accepts Brotli and a .br object exists, streams that precompressed representation with Content-Encoding: br; otherwise streams the raw pack.".to_string(),
+                summary: "Get a raw scene resource".to_string(),
+                description: "Returns an immutable raw DAT scene resource (outdoor or dungeon area pack) named area-{64 lowercase hex}.bin from world/area-packs/. When the client accepts Brotli and a .br object exists, streams that precompressed representation with Content-Encoding: br; otherwise streams the raw resource.".to_string(),
                 operation_id: "area_pack_get".to_string(),
                 parameters: vec![string_path_parameter(
                     "name",

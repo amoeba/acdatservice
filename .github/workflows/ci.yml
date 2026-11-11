@@ -45,4 +45,4 @@ jobs:
         run: cargo run --locked --quiet --example acli_appearance | diff - tests/fixtures/acli-appearance.hex
 
       - name: Test ACLI publish guards (local mocks only)
-        run: node --test scripts/check_acli_publish.test.mjs scripts/upload_landblock_instances.test.mjs scripts/check_area_pack_delivery.test.mjs
+        run: node --test scripts/*.test.mjs

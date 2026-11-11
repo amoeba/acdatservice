@@ -3,7 +3,7 @@ import { test } from 'node:test';
 import { createServer } from 'node:http';
 import { createHash } from 'node:crypto';
 import { brotliCompressSync } from 'node:zlib';
-import { checkAreaPackDelivery, checkCatalogDelivery, sampleCatalog } from './check_area_pack_delivery.mjs';
+import { checkAreaPackDelivery, checkCatalogDelivery, sampleCatalog, validateCatalog } from './check_area_pack_delivery.mjs';
 
 async function fixture(t, { doubleEncoded = false, fail = false } = {}) {
   const raw = Buffer.from('ACAP test bytes');
@@ -38,19 +38,29 @@ for (const doubleEncoded of [false, true]) {
 test('validates catalog, deduplicates filenames and samples smallest/largest', async t => {
   const { url, hash, bytes } = await fixture(t);
   const prefix = url.slice(0, url.lastIndexOf('/') + 1);
-  const d = n => ({ file: `area-${hash}.bin`, bytes, areaId: n, blocks: 1, acliRevision: 1 });
+  const d = () => ({ file: `area-${hash}.bin`, bytes, areaId: 'dungeon-01230100', blocks: [0x0123], acliRevision: 'appearance-v3', cellRanges: [[0x01230100, 0x01230146]] });
   assert.throws(() => sampleCatalog([], 0), /positive integer/);
   await assert.rejects(checkCatalogDelivery({ bad: { file: 'wrong', bytes: 1, areaId: 1, blocks: 1, acliRevision: 1 } }, { origin: prefix }), /Invalid filename/);
-  const result = await checkCatalogDelivery({ a: d(1), b: d(2) }, { origin: prefix, sample: 4 });
+  const result = await checkCatalogDelivery({ a: d(), b: d() }, { origin: prefix, sample: 4 });
   assert.equal(result.selected, 1);
   assert.equal(result.results[0].checks.length, 3);
+});
+
+test('catalog metadata uses actual ACAP string identities and block arrays, not numeric placeholders', () => {
+  const base = { file: `area-${'a'.repeat(64)}.bin`, bytes: 2683517, areaId: 'dungeon-01250100', blocks: [0x0125], acliRevision: 'appearance-v3', cellRanges: [[0x01250100, 0x01250146]] };
+  assert.deepEqual(validateCatalog({ '01250100': base }), [base]);
+  const outdoor = { ...base, areaId: 'area-f518-r2', blocks: [0xf417, 0xf418, 0xf518], cellRanges: undefined };
+  assert.deepEqual(validateCatalog({ 'Ithaenc Cathedral': outdoor }), [outdoor]);
+  for (const [field, value] of [['areaId', 1], ['blocks', 1], ['blocks', [0x10000]], ['blocks', [1, 1]], ['acliRevision', 1], ['cellRanges', [[-1, 1]]]]) {
+    assert.throws(() => validateCatalog({ bad: { ...base, [field]: value } }), /Invalid/);
+  }
 });
 
 test('catalog bulk checks reject HTTP failures and double encoding', async t => {
   for (const options of [{ fail: true }, { doubleEncoded: true }]) {
     const { url, hash, bytes } = await fixture(t, options);
     const origin = url.slice(0, url.lastIndexOf('/') + 1);
-    const d = { file: `area-${hash}.bin`, bytes, areaId: 0, blocks: 1, acliRevision: 1 };
+    const d = { file: `area-${hash}.bin`, bytes, areaId: 'area-f518-r2', blocks: [0xf518], acliRevision: 'appearance-v3' };
     await assert.rejects(checkCatalogDelivery({ x: d }, { origin }), options.fail ? /503/ : /Decoded body hash/);
   }
 });

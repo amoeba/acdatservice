@@ -59,10 +59,16 @@ async function upload(request, bucket, key) {
       (transfer === 'identity' && decodedBytes !== wireBytes)) return reply(400);
 
   let invalidInput = false;
-  const markInvalid = () => { invalidInput = true; };
-  let source = request.body.pipeThrough(countBytes(wireBytes, markInvalid));
-  if (transfer === 'gzip') source = source.pipeThrough(new DecompressionStream('gzip'));
-  source = source.pipeThrough(countBytes(decodedBytes, markInvalid));
+  // Identity is the bulk path on Workers Free: the declared wire and decoded
+  // lengths already agree, and native FixedLengthStream validates actual bytes.
+  // Avoid per-chunk JS transforms (and their CPU cost) for these large objects.
+  let source = request.body;
+  if (transfer === 'gzip') {
+    const markInvalid = () => { invalidInput = true; };
+    source = source.pipeThrough(countBytes(wireBytes, markInvalid));
+    source = source.pipeThrough(new DecompressionStream('gzip'));
+    source = source.pipeThrough(countBytes(decodedBytes, markInvalid));
+  }
 
   // FixedLengthStream provides an exact-size readable to R2 without buffering a
   // whole pack. The pipe and the put must run concurrently: awaiting either one

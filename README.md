@@ -31,6 +31,10 @@ applied page settings. Supplying both `after` and `offset` uses cursor paginatio
 
 ## Area-pack delivery verification
 
+For the separate, temporary private bulk-publishing Worker and operator teardown
+procedure, see [area-pack publishing](docs/area-pack-publishing.md). It is not
+part of the public service deployment.
+
 The single-URL check retains the three-representation verification:
 
 ```sh

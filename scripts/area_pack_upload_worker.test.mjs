@@ -9,11 +9,16 @@ const key = `world/area-packs/${filename}`;
 const bytes = new Uint8Array([0, 1, 2, 0xff, 0x1f, 0x8b]);
 
 // Node stand-in for the Workers-native FixedLengthStream.
+const NativeTransformStream = globalThis.TransformStream;
 globalThis.FixedLengthStream = class {
+  static bytes = 0;
+  static chunks = 0;
   constructor(length) {
     let count = 0;
-    const stream = new TransformStream({
+    const stream = new NativeTransformStream({
       transform(chunk, controller) {
+        globalThis.FixedLengthStream.bytes += chunk.byteLength;
+        globalThis.FixedLengthStream.chunks++;
         count += chunk.byteLength;
         if (count > length) throw new TypeError('FixedLengthStream overflow');
         controller.enqueue(chunk);
@@ -140,6 +145,47 @@ test('identity and gzip transfers write opaque raw and .br objects, GET never de
     assert.deepEqual(new Uint8Array(await res.arrayBuffer()), expected);
   }
   await status(await send(e, `/objects/${'a'.repeat(64)}.bin`), 404);
+});
+
+test('large identity upload takes only the native fixed-length path, with no JS transforms or decompressor', async () => {
+  const e = env();
+  const data = new Uint8Array(500 * 1024);
+  for (let i = 0; i < data.length; i++) data[i] = i & 255;
+  const priorTransform = globalThis.TransformStream;
+  const priorDecompress = globalThis.DecompressionStream;
+  globalThis.FixedLengthStream.bytes = 0;
+  globalThis.FixedLengthStream.chunks = 0;
+  try {
+    globalThis.TransformStream = class { constructor() { throw new Error('JS transform used for identity'); } };
+    globalThis.DecompressionStream = undefined;
+    const body = new ReadableStream({
+      start(controller) {
+        for (let i = 0; i < data.length; i += 65536) controller.enqueue(data.subarray(i, i + 65536));
+        controller.close();
+      },
+    });
+    await status(await send(e, `/objects/${filename}`, {
+      method: 'PUT', body,
+      headers: { 'Content-Length': String(data.length), 'X-Area-Pack-Bytes': String(data.length),
+        'X-Area-Pack-Transfer': 'identity' },
+    }), 201);
+    assert.equal(globalThis.FixedLengthStream.bytes, data.length);
+    assert.ok(globalThis.FixedLengthStream.chunks > 1);
+    assert.deepEqual(e.EXTRACTED_BUCKET.objects.get(key), data);
+  } finally {
+    globalThis.TransformStream = priorTransform;
+    globalThis.DecompressionStream = priorDecompress;
+  }
+});
+
+test('native fixed-length identity rejects short and long bodies without persisting either', async () => {
+  for (const declared of [bytes.length - 1, bytes.length + 1]) {
+    const e = env();
+    await status(await put(e, bytes, `/objects/${filename}`, {
+      'Content-Length': String(declared), 'X-Area-Pack-Bytes': String(declared),
+    }), 400);
+    assert.equal(e.EXTRACTED_BUCKET.objects.size, 0);
+  }
 });
 
 test('conditional writes cannot overwrite even if a concurrent writer wins after upload starts', async () => {

@@ -60,6 +60,21 @@ All other feature bits are unknown and must be rejected, not ignored. Existing
 | after overrides | 4 | `u32` | appearanceByteLength (`A`) | **only if feature mask 1 is set** |
 | after length | `A` | bytes | appearance | zero length means absent |
 
+Placement flags are independent bits; codecs preserve the byte verbatim:
+
+| Bit | Meaning |
+| --- | --- |
+| `0x01` | Source link-child placement |
+| `0x02` | Resolved generated placement |
+| `0x04` | Initial AC NoDraw: suppress the object's own model, not its independent effects |
+| `0x08` | Source `PropertyBool.Visibility` (18): admin-only object, withheld from ordinary players before creation |
+
+The admin-only bit is not native NoDraw (`PhysicsState` bit `0x20`). A viewer
+inspection control may reveal both, but their ordinary rendering semantics differ:
+admin-only suppresses the complete placement and its effects; NoDraw affects its
+own model only. Retain separately placed generated children and classify each
+from its own source properties.
+
 When mask 1 is set, **every record** has its own length word, including records
 without appearance (`A = 0`). No length word exists when mask 1 is clear.
 A present but empty appearance is a **12-byte** payload, distinct from absence.

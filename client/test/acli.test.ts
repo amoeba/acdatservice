@@ -6,6 +6,9 @@ import {
   ACLI_PREVIOUS_RECORD_LEN,
   ACLI_LEGACY_RECORD_LEN,
   ACLI_FLAG_LINK_CHILD,
+  ACLI_FLAG_GENERATED,
+  ACLI_FLAG_NO_DRAW,
+  ACLI_FLAG_ADMIN_ONLY,
   decodeAcli,
   encodeAcli,
   hasAcliMagic,
@@ -359,4 +362,17 @@ test("rejects trailing bytes", () => {
 test("encode validates landblock and override count", () => {
   assert.throws(() => encodeAcli(0x1_0000, []), /landblock out of range/);
   assert.throws(() => encodeAcli(-1, []), /landblock out of range/);
+});
+
+
+test("admin-only and NoDraw flags are independent and retained with placement flags", () => {
+  assert.equal(ACLI_FLAG_NO_DRAW, 0x04);
+  assert.equal(ACLI_FLAG_ADMIN_ONLY, 0x08);
+  for (const flags of [ACLI_FLAG_NO_DRAW, ACLI_FLAG_ADMIN_ONLY,
+    ACLI_FLAG_NO_DRAW | ACLI_FLAG_ADMIN_ONLY,
+    ACLI_FLAG_LINK_CHILD | ACLI_FLAG_GENERATED | ACLI_FLAG_NO_DRAW | ACLI_FLAG_ADMIN_ONLY]) {
+    const bytes = encodeAcli(0x019e, [instance({flags})]);
+    assert.equal(bytes[ACLI_HEADER_LEN + 45], flags);
+    assert.equal(decodeAcli(bytes).instances[0].flags, flags);
+  }
 });

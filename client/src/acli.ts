@@ -37,6 +37,9 @@ export const ACLI_FLAG_GENERATED = 0x02;
 /** ACLI transport bit for resolved AC NoDraw. This is NOT PhysicsState.NoDraw
  * (0x20): flags here belong to our exported placement format. */
 export const ACLI_FLAG_NO_DRAW = 0x04;
+/** Source PropertyBool.Visibility (18): ACE only tracks this object for
+ * Adminvision players. Separate from native NoDraw and its transport bit. */
+export const ACLI_FLAG_ADMIN_ONLY = 0x08;
 
 /** One per-Setup-part texture replacement (`newTextureId` of `partIndex`). */
 export interface TextureOverride {

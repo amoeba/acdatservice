@@ -37,6 +37,12 @@ pub const OVERRIDE_LEN: usize = 6;
 
 /// `flags` bit 0: the instance is a `landblock_instance.is_Link_Child` row.
 pub const LANDLOCK_INSTANCE_FLAG_LINK_CHILD: u8 = 0x01;
+/// Resolved generated placement, distinct from a raw link-child row.
+pub const LANDBLOCK_INSTANCE_FLAG_GENERATED: u8 = 0x02;
+/// Resolved initial native NoDraw state; this transport bit is not native 0x20.
+pub const LANDBLOCK_INSTANCE_FLAG_NO_DRAW: u8 = 0x04;
+/// Source Visibility (PropertyBool 18): only tracked for Adminvision players.
+pub const LANDBLOCK_INSTANCE_FLAG_ADMIN_ONLY: u8 = 0x08;
 
 /// One texture-map override applied to a Setup part.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -520,6 +526,29 @@ mod tests {
             guid: 0,
             texture_overrides: overrides,
             appearance: None,
+        }
+    }
+
+    #[test]
+    fn visibility_flags_are_independent() {
+        for flags in [
+            LANDBLOCK_INSTANCE_FLAG_NO_DRAW,
+            LANDBLOCK_INSTANCE_FLAG_ADMIN_ONLY,
+            LANDBLOCK_INSTANCE_FLAG_NO_DRAW | LANDBLOCK_INSTANCE_FLAG_ADMIN_ONLY,
+            LANDLOCK_INSTANCE_FLAG_LINK_CHILD
+                | LANDBLOCK_INSTANCE_FLAG_GENERATED
+                | LANDBLOCK_INSTANCE_FLAG_NO_DRAW
+                | LANDBLOCK_INSTANCE_FLAG_ADMIN_ONLY,
+        ] {
+            let mut row = instance(0x0200_026b, Vec::new());
+            row.flags = flags;
+            let value = LandblockInstances {
+                landblock: 0x019e,
+                instances: vec![row],
+            };
+            let bytes = encode(&value);
+            assert_eq!(bytes[HEADER_LEN + 45], flags);
+            assert_eq!(decode(&bytes).unwrap(), value);
         }
     }
 

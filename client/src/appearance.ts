@@ -29,14 +29,6 @@ export interface HeldAttachment {
 export const MAX_ATTACHMENT_DEPTH = 4;
 export const MAX_ATTACHMENT_NODES = 32;
 
-/** Invalid DAT frames are corruption, not an unsupported placement to omit. */
-export function validateAttachmentFrame(frame: { origin: { x: number; y: number; z: number }; orientation: { x: number; y: number; z: number; w: number } }): void {
-  const { origin: p, orientation: q } = frame;
-  if (![p.x, p.y, p.z, q.x, q.y, q.z, q.w].every(Number.isFinite) ||
-      q.x * q.x + q.y * q.y + q.z * q.z + q.w * q.w === 0) {
-    throw new Error("Held attachment: malformed DAT frame");
-  }
-}
 
 const uint = (n: number, max: number): number => {
   if (!Number.isInteger(n) || n < 0 || n > max) throw new Error("Appearance: integer out of range");
@@ -50,23 +42,6 @@ export function validateHeldAttachment(value: HeldAttachment): void {
   if (![1, 2, 3, 6].includes(value.placementId)) throw new Error("Appearance: unsupported held placement");
   if (!Number.isFinite(value.scale) || !Number.isFinite(Math.fround(value.scale)) || Math.fround(value.scale) <= 0) {
     throw new Error("Appearance: attachment scale must be positive finite f32");
-  }
-}
-
-/** ACE Creature_Equipment.GetPlacementLocation, using exact CurrentWieldedLocation.
- * Unsupported masks (including unnarrowed combined masks) are not guessed. */
-export function heldPlacement(currentWieldedLocation: number, itemType: number, defaultCombatStyle: number): Pick<HeldAttachment, "parentLocation" | "placementId"> {
-  switch (currentWieldedLocation) {
-    case 0x100000: // MeleeWeapon
-    case 0x1000000: // Held
-    case 0x2000000: // TwoHanded
-      return { parentLocation: 1, placementId: 1 };
-    case 0x200000: // Shield; non-armor is a left weapon
-      return itemType === 2 ? { parentLocation: 3, placementId: 6 } : { parentLocation: 8, placementId: 2 };
-    case 0x400000: // MissileWeapon; Bow / Crossbow
-      return defaultCombatStyle === 0x10 || defaultCombatStyle === 0x20
-        ? { parentLocation: 2, placementId: 3 } : { parentLocation: 1, placementId: 1 };
-    default: throw new Error(`Appearance: unsupported held equip mask ${currentWieldedLocation}`);
   }
 }
 

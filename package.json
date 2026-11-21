@@ -1,14 +1,78 @@
 {
-  "name": "acdatservice",
+  "name": "@amoeba/acdatservice-client",
   "version": "0.1.0",
-  "description": "acdatservice",
+  "description": "Browser-safe TypeScript codecs for acdatservice HTTP and packed formats.",
   "type": "module",
   "scripts": {
     "dev": "wrangler dev",
     "deploy": "wrangler deploy",
-    "test": "node --test scripts/*.test.mjs"
+    "test": "node --test scripts/*.test.mjs",
+    "build:client": "node -e \"require('fs').rmSync('client/dist', { recursive: true, force: true })\" && tsc -p client/tsconfig.json",
+    "typecheck:client": "tsc -p client/tsconfig.json --noEmit",
+    "check:browser:client": "node client/scripts/check-browser.mjs",
+    "test:client": "node --import tsx --test client/test/*.test.ts",
+    "verify:client": "npm run build:client && npm run check:browser:client && npm run test:client",
+    "prepare": "npm run build:client",
+    "prepack": "npm run build:client"
   },
   "devDependencies": {
+    "@amoeba/libac": "github:amoeba/libac-js#abd87b68a25a056dea51da2ae3bb0b43a3247b67",
+    "@types/node": "^22.20.5",
+    "esbuild": "^0.28.2",
+    "tsx": "^4.23.15",
+    "typescript": "^5.9.3",
     "wrangler": "^4.150.0"
+  },
+  "main": "./client/dist/index.js",
+  "types": "./client/dist/index.d.ts",
+  "files": [
+    "client/dist",
+    "LICENSE"
+  ],
+  "exports": {
+    ".": {
+      "types": "./client/dist/index.d.ts",
+      "import": "./client/dist/index.js"
+    },
+    "./multipart": {
+      "types": "./client/dist/multipart.d.ts",
+      "import": "./client/dist/multipart.js"
+    },
+    "./acli": {
+      "types": "./client/dist/acli.d.ts",
+      "import": "./client/dist/acli.js"
+    },
+    "./aclb": {
+      "types": "./client/dist/aclb.d.ts",
+      "import": "./client/dist/aclb.js"
+    },
+    "./acsp": {
+      "types": "./client/dist/acsp.d.ts",
+      "import": "./client/dist/acsp.js"
+    },
+    "./area-pack": {
+      "types": "./client/dist/areaPack.d.ts",
+      "import": "./client/dist/areaPack.js"
+    },
+    "./dat-routing": {
+      "types": "./client/dist/datRouting.d.ts",
+      "import": "./client/dist/datRouting.js"
+    },
+    "./instance-index": {
+      "types": "./client/dist/instanceIndex.d.ts",
+      "import": "./client/dist/instanceIndex.js"
+    },
+    "./acli-layout": {
+      "types": "./client/dist/acliLayout.d.ts",
+      "import": "./client/dist/acliLayout.js"
+    },
+    "./appearance": {
+      "types": "./client/dist/appearance.d.ts",
+      "import": "./client/dist/appearance.js"
+    },
+    "./package.json": "./package.json"
+  },
+  "peerDependencies": {
+    "@amoeba/libac": "^0.3.0"
   }
 }

@@ -44,5 +44,11 @@ jobs:
       - name: Check offline appearance demo against TypeScript fixture
         run: cargo run --locked --quiet --example acli_appearance | diff - tests/fixtures/acli-appearance.hex
 
+      - name: Install TypeScript client dependencies
+        run: npm ci
+
+      - name: Verify browser-safe service client and shared byte fixtures
+        run: npm run verify:client
+
       - name: Test ACLI publish guards (local mocks only)
         run: node --test scripts/*.test.mjs

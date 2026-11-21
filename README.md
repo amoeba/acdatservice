@@ -3,6 +3,26 @@
 Service for dynamically serving Asheron's Call Cell and Portal DAT resources.
 Built with Cloudflare Workers, R2, and D1.
 
+## Browser-safe client package
+
+`@amoeba/acdatservice-client` (this repository's `client/` directory) is the
+canonical TypeScript implementation of the service-specific contracts: the
+metadata-rich multipart parser, ACLI/ACLB/ACSP/ACAP/ACVC codecs, and the
+documented DAT-routing fallback. It is browser-safe, has no HTTP/cache/renderer
+policy, and depends only on `@amoeba/libac` for types (including the canonical
+`ObjDesc` that `Appearance` extends).
+
+```sh
+npm run build:client
+npm run typecheck:client
+npm run check:browser:client
+npm run test:client
+npm run verify:client
+```
+
+The Rust codecs remain authoritative for production. Shared fixtures under
+`tests/fixtures/` are decoded and re-encoded by both Rust and TypeScript tests.
+
 ## API Routes
 
 | Route | Description | Example |
